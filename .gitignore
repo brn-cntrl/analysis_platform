@@ -1,0 +1,48 @@
+# Node modules
+frontend/node_modules/
+
+# Production build
+frontend/build/
+
+# Dependencies lock files (optional - some prefer to commit these)
+frontend/package-lock.json
+frontend/yarn.lock
+
+# Cache and temp files
+frontend/.cache/
+frontend/.pnp/
+frontend/.pnp.js
+
+# Testing coverage
+frontend/coverage/
+
+# Environment variables (if you create any)
+frontend/.env
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# Debug logs
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+
+# Editor directories
+frontend/.vscode/
+frontend/.idea/
+
+# OS files
+frontend/.DS_Store
+
+# Test files and notes
+notes.txt
+convert_ts.py
+
+# Folders
+data/*
+!data/outputs/
+data/outputs/*
+
+!data/.gitkeep
+!data/outputs/.gitkeep
