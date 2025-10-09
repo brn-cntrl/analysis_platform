@@ -4,10 +4,10 @@ A web-based platform for analyzing EmotiBit biometric data with interactive visu
 
 ## Features
 
-- **File Upload Interface** - Drag and drop CSV files for ground truth data and event markers
+- **File Upload Interface** - Browse and upload CSV files for ground truth data and event markers
 - **Server-Side Notebook Execution** - Jupyter notebooks run on Flask backend using `nbconvert`
 - **Real-Time Analysis** - View statistics, data tables, and matplotlib plots instantly
-- **Interactive React UI** - Clean, responsive interface with no page refreshes
+- **Interactive React UI** - Responsive interface with no page refreshes
 - **Data Visualization** - Automatically generated time-series plots, histograms, and moving averages
 - **RESTful API** - Modular Flask endpoints for easy extension
 
