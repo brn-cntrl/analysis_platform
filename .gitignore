@@ -46,3 +46,5 @@ data/outputs/*
 
 !data/.gitkeep
 !data/outputs/.gitkeep
+!data/example_ground_truth.csv
+!data/example_markers.csv
