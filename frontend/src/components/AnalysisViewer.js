@@ -67,7 +67,7 @@ function AnalysisViewer() {
         boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
       }}>
         <h1 style={{ margin: '0 0 20px 0', color: '#333' }}>
-          📊 EmotiBit Data Analysis
+          EmotiBit Data Analysis
         </h1>
         
         <div style={{ marginBottom: '20px' }}>
