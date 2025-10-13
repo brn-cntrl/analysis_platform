@@ -1,36 +1,218 @@
 import React, { useState } from 'react';
+import './AnalysisViewer.css';
 
 function AnalysisViewer() {
-  const [groundTruthFile, setGroundTruthFile] = useState(null);
-  const [markersFile, setMarkersFile] = useState(null);
+  const [selectedFolder, setSelectedFolder] = useState(null);
+  const [fileStructure, setFileStructure] = useState(null);
+  const [availableMetrics, setAvailableMetrics] = useState([]);
+  const [availableEventMarkers, setAvailableEventMarkers] = useState([]);
+  const [availableConditions, setAvailableConditions] = useState([]);
+  const [selectedMetrics, setSelectedMetrics] = useState({});
   const [uploadStatus, setUploadStatus] = useState('');
+  const [isScanning, setIsScanning] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [results, setResults] = useState(null);
+  const [isTesting, setIsTesting] = useState(false);
+  const [testResults, setTestResults] = useState(null);
 
-  const handleGroundTruthChange = (e) => {
-    setGroundTruthFile(e.target.files[0]);
+  // Analysis Configuration State
+  const [baselineWindow, setBaselineWindow] = useState({
+    eventMarker: '',
+    timeWindowType: 'full', // 'full' or 'custom'
+    customStart: -5,
+    customEnd: 30
+  });
+
+  const [taskWindow, setTaskWindow] = useState({
+    eventMarker: '',
+    timeWindowType: 'full',
+    customStart: -5,
+    customEnd: 30
+  });
+
+  const handleFolderSelect = async (e) => {
+    const files = Array.from(e.target.files);
+    
+    if (files.length === 0) {
+      setUploadStatus('No folder selected');
+      return;
+    }
+
+    const folderName = files[0].webkitRelativePath.split('/')[0];
+    setSelectedFolder(folderName);
+
+    const structure = {
+      emotibitFiles: [],
+      respirationFiles: [],
+      serFile: null,
+      eventMarkersFile: null,
+      allFiles: files
+    };
+
+    files.forEach(file => {
+      const path = file.webkitRelativePath;
+      const fileName = file.name.toLowerCase();
+      const pathDepth = path.split('/').length;
+
+      if (path.includes('emotibit_data/') && fileName.endsWith('.csv')) {
+        structure.emotibitFiles.push({
+          name: file.name,
+          path: path,
+          file: file
+        });
+      } else if (path.includes('respiration_data/') && fileName.endsWith('.csv')) {
+        structure.respirationFiles.push({
+          name: file.name,
+          path: path,
+          file: file
+        });
+      } else if (pathDepth === 2 && fileName.endsWith('_event_markers.csv')) {
+        structure.eventMarkersFile = {
+          name: file.name,
+          path: path,
+          file: file
+        };
+      } else if (fileName.includes('ser') || fileName.includes('transcription')) {
+        structure.serFile = {
+          name: file.name,
+          path: path,
+          file: file
+        };
+      }
+    });
+
+    setFileStructure(structure);
+    setUploadStatus(`Folder "${folderName}" selected with ${files.length} files`);
+
+    await scanFolderData(structure);
   };
 
-  const handleMarkersChange = (e) => {
-    setMarkersFile(e.target.files[0]);
+  const scanFolderData = async (structure) => {
+    if (!structure.emotibitFiles || structure.emotibitFiles.length === 0) {
+      setUploadStatus('No EmotiBit files found');
+      return;
+    }
+
+    setIsScanning(true);
+    setUploadStatus('Scanning folder data...');
+
+    const formData = new FormData();
+    
+    const emotibitFileList = structure.emotibitFiles.map(f => f.name);
+    formData.append('emotibit_filenames', JSON.stringify(emotibitFileList));
+
+    if (structure.eventMarkersFile) {
+      formData.append('event_markers_file', structure.eventMarkersFile.file);
+    }
+
+    try {
+      const response = await fetch('/api/scan-folder-data', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await response.json();
+      
+      if (response.ok) {
+        setAvailableMetrics(data.metrics);
+        setAvailableEventMarkers(data.event_markers || []);
+        setAvailableConditions(data.conditions || []);
+        
+        const initialSelection = {};
+        data.metrics.forEach(metric => {
+          initialSelection[metric] = false;
+        });
+        setSelectedMetrics(initialSelection);
+        
+        const eventMarkersMsg = data.event_markers && data.event_markers.length > 0 
+          ? `, ${data.event_markers.length} event markers` 
+          : '';
+        const conditionsMsg = data.conditions && data.conditions.length > 0
+          ? `, ${data.conditions.length} conditions`
+          : '';
+        setUploadStatus(`Found ${data.metrics.length} metrics${eventMarkersMsg}${conditionsMsg}`);
+      } else {
+        setUploadStatus(`Error scanning folder: ${data.error}`);
+      }
+    } catch (error) {
+      setUploadStatus(`Error: ${error.message}`);
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  const handleMetricToggle = (metric) => {
+    setSelectedMetrics(prev => ({
+      ...prev,
+      [metric]: !prev[metric]
+    }));
+  };
+
+  const handleSelectAll = () => {
+    const allSelected = {};
+    availableMetrics.forEach(metric => {
+      allSelected[metric] = true;
+    });
+    setSelectedMetrics(allSelected);
+  };
+
+  const handleDeselectAll = () => {
+    const noneSelected = {};
+    availableMetrics.forEach(metric => {
+      noneSelected[metric] = false;
+    });
+    setSelectedMetrics(noneSelected);
+  };
+
+  const updateBaselineWindow = (field, value) => {
+    setBaselineWindow(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const updateTaskWindow = (field, value) => {
+    setTaskWindow(prev => ({
+      ...prev,
+      [field]: value
+    }));
   };
 
   const uploadAndAnalyze = async () => {
-    if (!groundTruthFile || !markersFile) {
-      setUploadStatus('Please select both files');
+    if (!fileStructure || !fileStructure.allFiles) {
+      setUploadStatus('Please select a subject folder');
+      return;
+    }
+
+    if (!baselineWindow.eventMarker || !taskWindow.eventMarker) {
+      setUploadStatus('Please select event markers for both baseline and task windows');
+      return;
+    }
+
+    const selectedMetricsList = Object.keys(selectedMetrics).filter(m => selectedMetrics[m]);
+    if (selectedMetricsList.length === 0) {
+      setUploadStatus('Please select at least one biometric metric');
       return;
     }
 
     const formData = new FormData();
-    formData.append('ground_truth', groundTruthFile);
-    formData.append('markers', markersFile);
+
+    fileStructure.allFiles.forEach(file => {
+      formData.append('files', file);
+      formData.append('paths', file.webkitRelativePath);
+    });
+
+    formData.append('folder_name', selectedFolder);
+    formData.append('selected_metrics', JSON.stringify(selectedMetricsList));
+    formData.append('baseline_window', JSON.stringify(baselineWindow));
+    formData.append('task_window', JSON.stringify(taskWindow));
 
     try {
       setIsAnalyzing(true);
-      setUploadStatus('Uploading files and running analysis...');
+      setUploadStatus('Uploading folder and running analysis...');
       setResults(null);
 
-      const response = await fetch('/api/upload-and-analyze', {
+      const response = await fetch('/api/upload-folder-and-analyze', {
         method: 'POST',
         body: formData,
       });
@@ -50,181 +232,437 @@ function AnalysisViewer() {
     }
   };
 
+  const getSelectedCount = () => {
+    return Object.values(selectedMetrics).filter(val => val).length;
+  };
+
+  const testTimestampMatching = async () => {
+    const selectedMetricsList = Object.keys(selectedMetrics).filter(m => selectedMetrics[m]);
+    
+    if (selectedMetricsList.length === 0) {
+      setUploadStatus('Please select at least one biometric metric to test');
+      return;
+    }
+
+    if (!fileStructure || !fileStructure.allFiles) {
+      setUploadStatus('Please select a subject folder first');
+      return;
+    }
+
+    // Use the first selected metric for testing
+    const metricToTest = selectedMetricsList[0];
+
+    try {
+      setIsTesting(true);
+      setUploadStatus(`Testing timestamp matching for ${metricToTest}...`);
+      setTestResults(null);
+
+      const formData = new FormData();
+      
+      // Only upload the files we need for testing
+      const filesToUpload = [];
+      const pathsToUpload = [];
+      
+      // Find and add the event markers file
+      if (fileStructure.eventMarkersFile) {
+        filesToUpload.push(fileStructure.eventMarkersFile.file);
+        pathsToUpload.push(fileStructure.eventMarkersFile.path);
+      }
+      
+      // Find and add the specific metric file
+      const metricFile = fileStructure.emotibitFiles.find(f => 
+        f.name.includes(`_${metricToTest}.csv`)
+      );
+      
+      if (metricFile) {
+        filesToUpload.push(metricFile.file);
+        pathsToUpload.push(metricFile.path);
+      }
+      
+      if (filesToUpload.length !== 2) {
+        setUploadStatus(`Error: Could not find required files (event markers and ${metricToTest})`);
+        setIsTesting(false);
+        return;
+      }
+      
+      console.log(`Uploading ${filesToUpload.length} files for testing:`, pathsToUpload);
+      
+      // Add only the necessary files
+      filesToUpload.forEach((file, index) => {
+        formData.append('files', file);
+        formData.append('paths', pathsToUpload[index]);
+      });
+      
+      formData.append('selected_metric', metricToTest);
+
+      const response = await fetch('/api/test-timestamp-matching', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await response.json();
+      
+      if (response.ok) {
+        setUploadStatus(`Test completed! Found ${data.total_matches} matches. Check terminal for details.`);
+        setTestResults(data);
+      } else {
+        setUploadStatus(`Error: ${data.error}`);
+      }
+    } catch (error) {
+      setUploadStatus(`Error: ${error.message}`);
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
   return (
-    <div style={{ 
-      minHeight: '100vh', 
-      backgroundColor: '#f5f5f5',
-      padding: '20px'
-    }}>
-      {/* Header */}
-      <div style={{ 
-        maxWidth: '1200px', 
-        margin: '0 auto',
-        backgroundColor: 'white',
-        borderRadius: '8px',
-        padding: '30px',
-        marginBottom: '20px',
-        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-      }}>
-        <h1 style={{ margin: '0 0 20px 0', color: '#333' }}>
-          EmotiBit Data Analysis
-        </h1>
+    <div className="container">
+      <div className="header-card">
+        <h1 className="main-title">Experiment Data Analysis</h1>
         
-        <div style={{ marginBottom: '20px' }}>
-          <label style={{ 
-            display: 'block', 
-            marginBottom: '8px', 
-            fontWeight: 'bold',
-            color: '#555'
-          }}>
-            Ground Truth Data (CSV):
+        <div className="folder-select-section">
+          <label className="input-label">
+            Select Subject Folder:
           </label>
           <input 
             type="file" 
-            accept=".csv"
-            onChange={handleGroundTruthChange}
-            style={{ marginBottom: '5px' }}
+            webkitdirectory="true"
+            directory="true"
+            multiple
+            onChange={handleFolderSelect}
+            className="folder-input"
           />
-          {groundTruthFile && (
-            <div style={{ color: '#4CAF50', fontSize: '14px' }}>
-              ✓ {groundTruthFile.name}
+          {selectedFolder && (
+            <div className="folder-selected">
+              ✓ Folder: <strong>{selectedFolder}</strong>
             </div>
           )}
         </div>
 
-        <div style={{ marginBottom: '20px' }}>
-          <label style={{ 
-            display: 'block', 
-            marginBottom: '8px', 
-            fontWeight: 'bold',
-            color: '#555'
-          }}>
-            Event Markers (CSV):
-          </label>
-          <input 
-            type="file" 
-            accept=".csv"
-            onChange={handleMarkersChange}
-            style={{ marginBottom: '5px' }}
-          />
-          {markersFile && (
-            <div style={{ color: '#4CAF50', fontSize: '14px' }}>
-              ✓ {markersFile.name}
+        {fileStructure && (
+          <div className="file-structure">
+            <h3 className="structure-title">Detected Files:</h3>
+            
+            <div className="file-category">
+              <strong>EmotiBit Data:</strong>
+              <span className="file-count">{fileStructure.emotibitFiles.length} files</span>
             </div>
-          )}
-        </div>
+
+            <div className="file-category">
+              <strong>Respiration Data:</strong>
+              <span className="file-count">{fileStructure.respirationFiles.length} files</span>
+            </div>
+
+            <div className="file-category">
+              <strong>Event Markers:</strong>
+              <span className={fileStructure.eventMarkersFile ? "file-found" : "file-missing"}>
+                {fileStructure.eventMarkersFile ? `✓ ${fileStructure.eventMarkersFile.name}` : '✗ Not found'}
+              </span>
+            </div>
+
+            <div className="file-category">
+              <strong>SER/Transcription:</strong>
+              <span className={fileStructure.serFile ? "file-found" : "file-missing"}>
+                {fileStructure.serFile ? `✓ ${fileStructure.serFile.name}` : '✗ Not found'}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {availableEventMarkers.length > 0 && (
+          <div className="event-markers-section">
+            <h3 className="structure-title">Event Markers ({availableEventMarkers.length})</h3>
+            <div className="event-markers-grid">
+              {availableEventMarkers.map((marker, idx) => (
+                <div key={idx} className="event-marker-badge">
+                  {marker}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {availableConditions.length > 0 && (
+          <div className="conditions-section-display">
+            <h3 className="structure-title">Conditions ({availableConditions.length})</h3>
+            <div className="conditions-grid">
+              {availableConditions.map((condition, idx) => (
+                <div key={idx} className="condition-badge-display">
+                  {condition}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Analysis Configuration */}
+        {availableEventMarkers.length > 0 && (
+          <div className="analysis-config-section">
+            <h3 className="structure-title">Analysis Configuration</h3>
+            
+            <div className="analysis-windows">
+              {/* Baseline Window */}
+              <div className="analysis-window">
+                <h4 className="window-title">Baseline Window</h4>
+                
+                <div className="window-config">
+                  <label className="config-label">Event Marker:</label>
+                  <select 
+                    className="config-select"
+                    value={baselineWindow.eventMarker}
+                    onChange={(e) => updateBaselineWindow('eventMarker', e.target.value)}
+                  >
+                    <option value="">Select event marker...</option>
+                    {availableEventMarkers.map(marker => (
+                      <option key={marker} value={marker}>{marker}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="window-config">
+                  <label className="config-label">Time Window:</label>
+                  <div className="radio-group">
+                    <label className="radio-label">
+                      <input
+                        type="radio"
+                        checked={baselineWindow.timeWindowType === 'full'}
+                        onChange={() => updateBaselineWindow('timeWindowType', 'full')}
+                      />
+                      <span>Full event duration</span>
+                    </label>
+                    <label className="radio-label">
+                      <input
+                        type="radio"
+                        checked={baselineWindow.timeWindowType === 'custom'}
+                        onChange={() => updateBaselineWindow('timeWindowType', 'custom')}
+                      />
+                      <span>Custom offset</span>
+                    </label>
+                  </div>
+                  
+                  {baselineWindow.timeWindowType === 'custom' && (
+                    <div className="custom-time-inputs">
+                      <div className="time-input-group">
+                        <label>Start:</label>
+                        <input
+                          type="number"
+                          value={baselineWindow.customStart}
+                          onChange={(e) => updateBaselineWindow('customStart', parseFloat(e.target.value))}
+                          className="time-input"
+                        />
+                        <span>seconds</span>
+                      </div>
+                      <div className="time-input-group">
+                        <label>End:</label>
+                        <input
+                          type="number"
+                          value={baselineWindow.customEnd}
+                          onChange={(e) => updateBaselineWindow('customEnd', parseFloat(e.target.value))}
+                          className="time-input"
+                        />
+                        <span>seconds</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Task Window */}
+              <div className="analysis-window">
+                <h4 className="window-title">Task Window</h4>
+                
+                <div className="window-config">
+                  <label className="config-label">Event Marker:</label>
+                  <select 
+                    className="config-select"
+                    value={taskWindow.eventMarker}
+                    onChange={(e) => updateTaskWindow('eventMarker', e.target.value)}
+                  >
+                    <option value="">Select event marker...</option>
+                    {availableEventMarkers.map(marker => (
+                      <option key={marker} value={marker}>{marker}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="window-config">
+                  <label className="config-label">Time Window:</label>
+                  <div className="radio-group">
+                    <label className="radio-label">
+                      <input
+                        type="radio"
+                        checked={taskWindow.timeWindowType === 'full'}
+                        onChange={() => updateTaskWindow('timeWindowType', 'full')}
+                      />
+                      <span>Full event duration</span>
+                    </label>
+                    <label className="radio-label">
+                      <input
+                        type="radio"
+                        checked={taskWindow.timeWindowType === 'custom'}
+                        onChange={() => updateTaskWindow('timeWindowType', 'custom')}
+                      />
+                      <span>Custom offset</span>
+                    </label>
+                  </div>
+                  
+                  {taskWindow.timeWindowType === 'custom' && (
+                    <div className="custom-time-inputs">
+                      <div className="time-input-group">
+                        <label>Start:</label>
+                        <input
+                          type="number"
+                          value={taskWindow.customStart}
+                          onChange={(e) => updateTaskWindow('customStart', parseFloat(e.target.value))}
+                          className="time-input"
+                        />
+                        <span>seconds</span>
+                      </div>
+                      <div className="time-input-group">
+                        <label>End:</label>
+                        <input
+                          type="number"
+                          value={taskWindow.customEnd}
+                          onChange={(e) => updateTaskWindow('customEnd', parseFloat(e.target.value))}
+                          className="time-input"
+                        />
+                        <span>seconds</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Metrics Selection */}
+        {availableMetrics.length > 0 && (
+          <div className="metrics-section">
+            <div className="metrics-header">
+              <h3 className="structure-title">Available Biometric Metrics ({availableMetrics.length})</h3>
+              <div className="metrics-controls">
+                <button onClick={handleSelectAll} className="metric-control-btn">
+                  Select All
+                </button>
+                <button onClick={handleDeselectAll} className="metric-control-btn">
+                  Deselect All
+                </button>
+                <span className="selected-count">
+                  {getSelectedCount()} selected
+                </span>
+              </div>
+            </div>
+            
+            <div className="metrics-grid">
+              {availableMetrics.map(metric => (
+                <label key={metric} className="metric-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={selectedMetrics[metric] || false}
+                    onChange={() => handleMetricToggle(metric)}
+                  />
+                  <span className="metric-label">{metric}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+        {availableMetrics.length > 0 && getSelectedCount() > 0 && (
+          <div className="test-section">
+            <button 
+              onClick={testTimestampMatching}
+              disabled={isTesting || isAnalyzing}
+              className={`test-button ${isTesting || isAnalyzing ? 'disabled' : ''}`}
+            >
+              {isTesting ? '🔍 Testing...' : '🧪 Test Timestamp Matching'}
+            </button>
+            {testResults && (
+              <div className="test-results-summary">
+                <strong>Test Results:</strong>
+                <div>Metric: {testResults.metric}</div>
+                <div>Offset: {testResults.offset_seconds.toFixed(2)}s ({testResults.offset_hours.toFixed(2)} hours)</div>
+                <div>Matches Found: {testResults.total_matches}</div>
+                {testResults.total_matches > 0 && (
+                  <>
+                    <div>Avg Time Diff: {testResults.avg_time_diff.toFixed(3)}s</div>
+                    <div>Max Time Diff: {testResults.max_time_diff.toFixed(3)}s</div>
+                    <div>Min Time Diff: {testResults.min_time_diff.toFixed(3)}s</div>
+                  </>
+                )}
+                <div className="test-note">See terminal for full match details</div>
+              </div>
+            )}
+          </div>
+        )}
 
         <button 
           onClick={uploadAndAnalyze}
-          disabled={isAnalyzing}
-          style={{
-            padding: '12px 30px',
-            backgroundColor: isAnalyzing ? '#ccc' : '#2196F3',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: isAnalyzing ? 'not-allowed' : 'pointer',
-            fontSize: '16px',
-            fontWeight: 'bold'
-          }}
+          disabled={isAnalyzing || !fileStructure || isScanning}
+          className={`analyze-button ${isAnalyzing || !fileStructure || isScanning ? 'disabled' : ''}`}
         >
-          {isAnalyzing ? '⏳ Analyzing...' : '🚀 Upload & Analyze'}
+          {isAnalyzing ? '⏳ Analyzing...' : isScanning ? '🔍 Scanning...' : 'Run Analysis'}
         </button>
 
         {uploadStatus && (
-          <div style={{ 
-            marginTop: '15px', 
-            padding: '12px', 
-            backgroundColor: uploadStatus.includes('Error') ? '#ffebee' : '#e8f5e9',
-            color: uploadStatus.includes('Error') ? '#c62828' : '#2e7d32',
-            borderRadius: '4px',
-            fontSize: '14px'
-          }}>
+          <div className={`status-message ${uploadStatus.includes('Error') ? 'error' : 'success'}`}>
             {uploadStatus}
           </div>
         )}
       </div>
 
-      {/* Results Display */}
       {results && (
-        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-          
-          {/* Ground Truth Data */}
-          <div style={{ 
-            backgroundColor: 'white',
-            borderRadius: '8px',
-            padding: '25px',
-            marginBottom: '20px',
-            boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-          }}>
-            <h2 style={{ marginTop: 0, color: '#333' }}>Ground Truth Data</h2>
-            <p style={{ color: '#666' }}>
+        <div className="results-container">
+          <div className="result-card">
+            <h2 className="card-title">Ground Truth Data</h2>
+            <p className="data-info">
               <strong>Shape:</strong> {results.ground_truth.shape[0]} rows × {results.ground_truth.shape[1]} columns
             </p>
             
             {results.ground_truth.stats && (
-              <div style={{ 
-                display: 'grid', 
-                gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-                gap: '15px',
-                marginBottom: '20px'
-              }}>
-                <div style={{ padding: '15px', backgroundColor: '#e3f2fd', borderRadius: '4px' }}>
-                  <div style={{ fontSize: '12px', color: '#666' }}>Mean</div>
-                  <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#1976d2' }}>
+              <div className="stats-grid">
+                <div className="stat-card stat-mean">
+                  <div className="stat-label">Mean</div>
+                  <div className="stat-value">
                     {results.ground_truth.stats.mean.toFixed(2)}
                   </div>
                 </div>
-                <div style={{ padding: '15px', backgroundColor: '#e8f5e9', borderRadius: '4px' }}>
-                  <div style={{ fontSize: '12px', color: '#666' }}>Std Dev</div>
-                  <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#388e3c' }}>
+                <div className="stat-card stat-std">
+                  <div className="stat-label">Std Dev</div>
+                  <div className="stat-value">
                     {results.ground_truth.stats.std.toFixed(2)}
                   </div>
                 </div>
-                <div style={{ padding: '15px', backgroundColor: '#fff3e0', borderRadius: '4px' }}>
-                  <div style={{ fontSize: '12px', color: '#666' }}>Min</div>
-                  <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#f57c00' }}>
+                <div className="stat-card stat-min">
+                  <div className="stat-label">Min</div>
+                  <div className="stat-value">
                     {results.ground_truth.stats.min.toFixed(2)}
                   </div>
                 </div>
-                <div style={{ padding: '15px', backgroundColor: '#fce4ec', borderRadius: '4px' }}>
-                  <div style={{ fontSize: '12px', color: '#666' }}>Max</div>
-                  <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#c2185b' }}>
+                <div className="stat-card stat-max">
+                  <div className="stat-label">Max</div>
+                  <div className="stat-value">
                     {results.ground_truth.stats.max.toFixed(2)}
                   </div>
                 </div>
               </div>
             )}
 
-            <h3 style={{ color: '#555' }}>First 10 Rows</h3>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ 
-                width: '100%', 
-                borderCollapse: 'collapse',
-                fontSize: '13px'
-              }}>
+            <h3 className="section-title">First 10 Rows</h3>
+            <div className="table-container">
+              <table className="data-table">
                 <thead>
-                  <tr style={{ backgroundColor: '#f5f5f5' }}>
+                  <tr>
                     {results.ground_truth.columns.map((col, idx) => (
-                      <th key={idx} style={{ 
-                        padding: '10px', 
-                        textAlign: 'left',
-                        borderBottom: '2px solid #ddd',
-                        fontWeight: 'bold'
-                      }}>
-                        {col}
-                      </th>
+                      <th key={idx}>{col}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {results.ground_truth.head.map((row, idx) => (
-                    <tr key={idx} style={{ 
-                      borderBottom: '1px solid #eee',
-                      backgroundColor: idx % 2 === 0 ? 'white' : '#fafafa'
-                    }}>
+                    <tr key={idx}>
                       {results.ground_truth.columns.map((col, colIdx) => (
-                        <td key={colIdx} style={{ padding: '8px' }}>
+                        <td key={colIdx}>
                           {typeof row[col] === 'number' ? row[col].toFixed(3) : row[col]}
                         </td>
                       ))}
@@ -235,30 +673,18 @@ function AnalysisViewer() {
             </div>
           </div>
 
-          {/* Markers Data */}
-          <div style={{ 
-            backgroundColor: 'white',
-            borderRadius: '8px',
-            padding: '25px',
-            marginBottom: '20px',
-            boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-          }}>
-            <h2 style={{ marginTop: 0, color: '#333' }}>Event Markers</h2>
-            <p style={{ color: '#666' }}>
+          <div className="result-card">
+            <h2 className="card-title">Event Markers</h2>
+            <p className="data-info">
               <strong>Shape:</strong> {results.markers.shape[0]} rows × {results.markers.shape[1]} columns
             </p>
 
             {results.markers.conditions && (
-              <div style={{ marginBottom: '20px' }}>
-                <h3 style={{ color: '#555' }}>Conditions</h3>
-                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              <div className="conditions-section">
+                <h3 className="section-title">Conditions</h3>
+                <div className="conditions-container">
                   {Object.entries(results.markers.conditions).map(([condition, count]) => (
-                    <div key={condition} style={{
-                      padding: '8px 16px',
-                      backgroundColor: '#e3f2fd',
-                      borderRadius: '20px',
-                      fontSize: '14px'
-                    }}>
+                    <div key={condition} className="condition-badge">
                       <strong>{condition}:</strong> {count}
                     </div>
                   ))}
@@ -266,37 +692,21 @@ function AnalysisViewer() {
               </div>
             )}
 
-            <h3 style={{ color: '#555' }}>First 10 Rows</h3>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ 
-                width: '100%', 
-                borderCollapse: 'collapse',
-                fontSize: '13px'
-              }}>
+            <h3 className="section-title">First 10 Rows</h3>
+            <div className="table-container">
+              <table className="data-table">
                 <thead>
-                  <tr style={{ backgroundColor: '#f5f5f5' }}>
+                  <tr>
                     {results.markers.columns.map((col, idx) => (
-                      <th key={idx} style={{ 
-                        padding: '10px', 
-                        textAlign: 'left',
-                        borderBottom: '2px solid #ddd',
-                        fontWeight: 'bold'
-                      }}>
-                        {col}
-                      </th>
+                      <th key={idx}>{col}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {results.markers.head.map((row, idx) => (
-                    <tr key={idx} style={{ 
-                      borderBottom: '1px solid #eee',
-                      backgroundColor: idx % 2 === 0 ? 'white' : '#fafafa'
-                    }}>
+                    <tr key={idx}>
                       {results.markers.columns.map((col, colIdx) => (
-                        <td key={colIdx} style={{ padding: '8px' }}>
-                          {row[col]}
-                        </td>
+                        <td key={colIdx}>{row[col]}</td>
                       ))}
                     </tr>
                   ))}
@@ -305,27 +715,16 @@ function AnalysisViewer() {
             </div>
           </div>
 
-          {/* Matplotlib Plots */}
           {results.plots && results.plots.length > 0 && (
-            <div style={{ 
-              backgroundColor: 'white',
-              borderRadius: '8px',
-              padding: '25px',
-              boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-            }}>
-              <h2 style={{ marginTop: 0, color: '#333' }}>Visualizations</h2>
+            <div className="result-card">
+              <h2 className="card-title">Visualizations</h2>
               {results.plots.map((plot, idx) => (
-                <div key={idx} style={{ marginBottom: '30px' }}>
-                  <h3 style={{ color: '#555', marginBottom: '10px' }}>{plot.name}</h3>
+                <div key={idx} className="plot-container">
+                  <h3 className="plot-title">{plot.name}</h3>
                   <img 
                     src={plot.url} 
                     alt={plot.name}
-                    style={{ 
-                      width: '100%', 
-                      height: 'auto',
-                      borderRadius: '4px',
-                      border: '1px solid #eee'
-                    }}
+                    className="plot-image"
                   />
                 </div>
               ))}

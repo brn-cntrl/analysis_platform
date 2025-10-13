@@ -4,11 +4,16 @@ from werkzeug.utils import secure_filename
 import os
 import subprocess
 import json
+import shutil
+import re
+import pandas as pd
+import io
+from datetime import datetime
+import numpy as np
 
 app = Flask(__name__, static_folder='frontend/build', static_url_path='')
 CORS(app)
 
-# Configure paths
 UPLOAD_FOLDER = 'data'
 OUTPUT_FOLDER = 'data/outputs'
 NOTEBOOK_PATH = 'data_analysis.ipynb'
@@ -18,7 +23,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -27,32 +32,116 @@ def allowed_file(filename):
 def hello():
     return jsonify({'message': 'Hello from Flask!'})
 
-@app.route('/api/upload-and-analyze', methods=['POST'])
-def upload_and_analyze():
-    """Upload files and execute notebook analysis"""
+@app.route('/api/upload-folder-and-analyze', methods=['POST'])
+def upload_folder_and_analyze():
+    """Upload subject folder and execute notebook analysis"""
     
-    # Check if files are present
-    if 'ground_truth' not in request.files or 'markers' not in request.files:
-        return jsonify({'error': 'Both ground_truth and markers files are required'}), 400
+    if 'files' not in request.files:
+        return jsonify({'error': 'No files uploaded'}), 400
     
-    ground_truth_file = request.files['ground_truth']
-    markers_file = request.files['markers']
+    files = request.files.getlist('files')
+    paths = request.form.getlist('paths')
+    folder_name = request.form.get('folder_name', 'subject_data')
     
-    # Validate files
-    if ground_truth_file.filename == '' or markers_file.filename == '':
-        return jsonify({'error': 'No files selected'}), 400
+    # Get analysis configuration
+    selected_metrics_json = request.form.get('selected_metrics', '[]')
+    baseline_window_json = request.form.get('baseline_window', '{}')
+    task_window_json = request.form.get('task_window', '{}')
     
-    if not (allowed_file(ground_truth_file.filename) and allowed_file(markers_file.filename)):
-        return jsonify({'error': 'Only CSV files are allowed'}), 400
+    selected_metrics = json.loads(selected_metrics_json)
+    baseline_window = json.loads(baseline_window_json)
+    task_window = json.loads(task_window_json)
+    
+    print(f"Analysis Configuration:")
+    print(f"  Selected Metrics: {selected_metrics}")
+    print(f"  Baseline Window: {baseline_window}")
+    print(f"  Task Window: {task_window}")
+    
+    if not files or len(files) == 0:
+        return jsonify({'error': 'No files in upload'}), 400
     
     try:
-        ground_truth_path = os.path.join(app.config['UPLOAD_FOLDER'], 'ground_truth.csv')
-        markers_path = os.path.join(app.config['UPLOAD_FOLDER'], 'markers.csv')
+        subject_folder = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(folder_name))
         
-        ground_truth_file.save(ground_truth_path)
-        markers_file.save(markers_path)
+        if os.path.exists(subject_folder):
+            shutil.rmtree(subject_folder)
         
-        print(f"Files saved: {ground_truth_path}, {markers_path}")
+        os.makedirs(subject_folder, exist_ok=True)
+        
+        file_manifest = {
+            'emotibit_files': [],
+            'respiration_files': [],
+            'event_markers': None,
+            'ser_file': None,
+            'other_files': []
+        }
+        
+        for file, path in zip(files, paths):
+            if not allowed_file(file.filename):
+                continue
+            
+            relative_path = path.split('/', 1)[1] if '/' in path else file.filename
+            file_path = os.path.join(subject_folder, relative_path)
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            file.save(file_path)
+            filename_lower = file.filename.lower()
+            path_depth = len(path.split('/'))
+            
+            if 'emotibit_data' in path.lower():
+                file_manifest['emotibit_files'].append({
+                    'filename': file.filename,
+                    'path': file_path,
+                    'relative_path': relative_path
+                })
+            elif 'respiration_data' in path.lower():
+                file_manifest['respiration_files'].append({
+                    'filename': file.filename,
+                    'path': file_path,
+                    'relative_path': relative_path
+                })
+            elif path_depth == 2 and filename_lower.endswith('_event_markers.csv'):
+                file_manifest['event_markers'] = {
+                    'filename': file.filename,
+                    'path': file_path,
+                    'relative_path': relative_path
+                }
+            elif 'ser' in filename_lower or 'transcription' in filename_lower:
+                file_manifest['ser_file'] = {
+                    'filename': file.filename,
+                    'path': file_path,
+                    'relative_path': relative_path
+                }
+            else:
+                file_manifest['other_files'].append({
+                    'filename': file.filename,
+                    'path': file_path,
+                    'relative_path': relative_path
+                })
+        
+        # Add analysis configuration to manifest
+        file_manifest['analysis_config'] = {
+            'selected_metrics': selected_metrics,
+            'baseline_window': baseline_window,
+            'task_window': task_window
+        }
+        
+        manifest_path = os.path.join(subject_folder, 'file_manifest.json')
+        with open(manifest_path, 'w') as f:
+            json.dump(file_manifest, f, indent=2)
+        
+        print(f"Files organized in: {subject_folder}")
+        print(f"Event markers file: {file_manifest['event_markers']}")
+        
+        if file_manifest['emotibit_files']:
+            ground_truth_path = os.path.join(app.config['UPLOAD_FOLDER'], 'ground_truth.csv')
+            shutil.copy(file_manifest['emotibit_files'][0]['path'], ground_truth_path)
+        
+        if file_manifest['event_markers']:
+            markers_path = os.path.join(app.config['UPLOAD_FOLDER'], 'markers.csv')
+            shutil.copy(file_manifest['event_markers']['path'], markers_path)
+        else:
+            print("WARNING: No event markers file found!")
+        
         print("Executing notebook...")
         result = subprocess.run(
             [
@@ -64,7 +153,7 @@ def upload_and_analyze():
             ],
             capture_output=True,
             text=True,
-            timeout=60  # 60 second timeout
+            timeout=120
         )
         
         if result.returncode != 0:
@@ -74,19 +163,20 @@ def upload_and_analyze():
         
         print("Notebook executed successfully")
         
-        # Read results from JSON file created by notebook
         results_path = os.path.join(OUTPUT_FOLDER, 'results.json')
         if os.path.exists(results_path):
             with open(results_path, 'r') as f:
                 results = json.load(f)
             
-            # Add image URLs
             for plot in results.get('plots', []):
                 plot['url'] = f"/api/plot/{plot['filename']}"
             
+            results['file_manifest'] = file_manifest
+            
             return jsonify({
                 'message': 'Analysis completed successfully',
-                'results': results
+                'results': results,
+                'folder_name': folder_name
             }), 200
         else:
             return jsonify({'error': 'Results file not found'}), 500
@@ -96,8 +186,10 @@ def upload_and_analyze():
     except Exception as e:
         error_msg = f"Error: {str(e)}"
         print(error_msg)
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': error_msg}), 500
-
+    
 @app.route('/api/plot/<filename>', methods=['GET'])
 def serve_plot(filename):
     """Serve matplotlib plot images"""
@@ -119,7 +211,6 @@ def get_results():
             with open(results_path, 'r') as f:
                 results = json.load(f)
             
-            # Add image URLs
             for plot in results.get('plots', []):
                 plot['url'] = f"/api/plot/{plot['filename']}"
             
@@ -129,19 +220,9 @@ def get_results():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('api/save_images', methods=['POST'])
+@app.route('/api/save_images', methods=['POST'])
 def save_images():
-    """
-    Saves all PNG images from the OUTPUT_FOLDER to a specified target folder.
-    This route expects a JSON payload with an optional 'folder_name' key. It creates a target folder
-    inside the 'data' directory using the provided folder name (or 'default_folder' if not specified).
-    All PNG files in the OUTPUT_FOLDER are copied to the target folder.
-    Returns:
-        JSON response with a success message and HTTP 200 status code if images are saved successfully.
-        If an error occurs, returns a JSON response with the error message and HTTP 500 status code.
-    """
-    global OUTPUT_FOLDER
-
+    """Save all PNG images from OUTPUT_FOLDER to a specified target folder"""
     try:
         data = request.get_json()
         folder_name = data.get('folder_name', 'default_folder')
@@ -152,15 +233,400 @@ def save_images():
             if filename.endswith('.png'):
                 src_path = os.path.join(OUTPUT_FOLDER, filename)
                 dst_path = os.path.join(target_folder, filename)
-                with open(src_path, 'rb') as src_file:
-                    with open(dst_path, 'wb') as dst_file:
-                        dst_file.write(src_file.read())
+                shutil.copy2(src_path, dst_path)
         
         return jsonify({'message': f'Images saved to {target_folder}'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/scan-folder-data', methods=['POST'])
+def scan_folder_data():
+    """Scan folder for metrics, event markers, and conditions"""
+    try:
+        # Get emotibit filenames
+        emotibit_filenames_json = request.form.get('emotibit_filenames')
+        if not emotibit_filenames_json:
+            return jsonify({'error': 'No emotibit filenames provided'}), 400
+        
+        emotibit_filenames = json.loads(emotibit_filenames_json)
+        print(f"Scanning {len(emotibit_filenames)} EmotiBit files")
+        
+        # Extract metric tags from filenames
+        metrics = set()
+        exclude_tags = {'timesyncs', 'timesyncmap'}
+        
+        for filename in emotibit_filenames:
+            match = re.search(r'_emotibit_ground_truth_([A-Z0-9%]+)\.csv$', filename)
+            if match:
+                metric_tag = match.group(1)
+                if metric_tag.lower() not in exclude_tags:
+                    metrics.add(metric_tag)
+        
+        metrics_list = sorted(list(metrics))
+        print(f"Found {len(metrics_list)} metrics: {metrics_list}")
+        
+        # Extract event markers and conditions from event markers file
+        event_markers = []
+        conditions = []
+        if 'event_markers_file' in request.files:
+            event_markers_file = request.files['event_markers_file']
+            print(f"Processing event markers file: {event_markers_file.filename}")
+            
+            try:
+                # Read the CSV file
+                import pandas as pd
+                import io
+                
+                # Read file content
+                file_content = event_markers_file.read()
+                
+                # Try to decode with different encodings
+                try:
+                    content_str = file_content.decode('utf-8')
+                except UnicodeDecodeError:
+                    content_str = file_content.decode('latin-1')
+                
+                # Parse CSV
+                df = pd.read_csv(io.StringIO(content_str))
+                
+                print(f"Event markers CSV columns: {df.columns.tolist()}")
+                
+                # Extract event markers
+                if 'event_marker' in df.columns:
+                    # Get unique event markers, excluding NaN/None
+                    unique_markers = df['event_marker'].dropna().unique()
+                    
+                    # Process markers - normalize PRS markers
+                    processed_markers = set()
+                    for marker in unique_markers:
+                        marker_str = str(marker)
+                        
+                        # Check if marker contains PRS (case insensitive)
+                        if 'prs_' in marker_str.lower():
+                            # Extract just prs_N format
+                            prs_match = re.search(r'(prs_\d+)', marker_str, re.IGNORECASE)
+                            if prs_match:
+                                # Normalize to lowercase
+                                normalized_prs = prs_match.group(1).lower()
+                                processed_markers.add(normalized_prs)
+                            else:
+                                # If no number found, just add the original
+                                processed_markers.add(marker_str)
+                        else:
+                            # Not a PRS marker, add as-is
+                            processed_markers.add(marker_str)
+                    
+                    event_markers = sorted(list(processed_markers))
+                    print(f"Found {len(event_markers)} unique event markers: {event_markers}")
+                else:
+                    print(f"WARNING: 'event_marker' column not found in CSV")
+                
+                # Extract conditions
+                if 'condition' in df.columns:
+                    # Get unique conditions, excluding NaN/None
+                    unique_conditions = df['condition'].dropna().unique()
+                    conditions = sorted([str(cond) for cond in unique_conditions])
+                    print(f"Found {len(conditions)} unique conditions: {conditions}")
+                else:
+                    print(f"WARNING: 'condition' column not found in CSV")
+                    
+            except Exception as e:
+                error_msg = f"Error reading event markers file: {str(e)}"
+                print(error_msg)
+                import traceback
+                traceback.print_exc()
+        else:
+            print("No event markers file provided")
+        
+        return jsonify({
+            'metrics': metrics_list,
+            'metrics_count': len(metrics_list),
+            'event_markers': event_markers,
+            'event_markers_count': len(event_markers),
+            'conditions': conditions,
+            'conditions_count': len(conditions)
+        }), 200
+        
+    except Exception as e:
+        error_msg = f"Error scanning folder data: {str(e)}"
+        print(error_msg)
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': error_msg}), 500
+
+def prepare_event_markers_timestamps(event_markers_df):
+    """
+    Prepare event markers dataframe to ensure it has unix_timestamp column.
+    Handles backward compatibility for files that use 'timestamp' with ISO format.
     
-# Serve React App
+    Returns: Modified dataframe with 'unix_timestamp' column
+    """
+    df = event_markers_df.copy()
+    
+    # Check if unix_timestamp already exists
+    if 'unix_timestamp' in df.columns:
+        print("Found 'unix_timestamp' column - using as-is")
+        return df
+    
+    # Check for 'timestamp' column (backward compatibility)
+    if 'timestamp' in df.columns:
+        print("Found 'timestamp' column (ISO format) - converting to unix_timestamp")
+        
+        # Convert ISO format timestamps to Unix timestamps
+        dt_series = pd.to_datetime(df['timestamp'], errors='coerce')
+        
+        # Convert to Unix timestamp
+        df['unix_timestamp'] = (dt_series - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s')
+        
+        # Debug: Check for bad values
+        print(f"After conversion:")
+        print(f"  Total rows: {len(df)}")
+        print(f"  NaN values: {df['unix_timestamp'].isna().sum()}")
+        print(f"  Min value: {df['unix_timestamp'].min()}")
+        print(f"  Max value: {df['unix_timestamp'].max()}")
+        
+        # Drop NaN values
+        before = len(df)
+        df = df.dropna(subset=['unix_timestamp'])
+        after = len(df)
+        
+        if before > after:
+            print(f"Dropped {before - after} rows with invalid timestamps")
+        
+        # Debug: Check again after dropna
+        print(f"After dropna:")
+        print(f"  Total rows: {len(df)}")
+        print(f"  Min value: {df['unix_timestamp'].min()}")
+        print(f"  Max value: {df['unix_timestamp'].max()}")
+        
+        print(f"Successfully converted {after} timestamps from ISO to Unix format")
+        print(f"Sample conversions:")
+        for i in range(min(3, len(df))):
+            print(f"  {df.iloc[i]['timestamp']} → {df.iloc[i]['unix_timestamp']:.6f}")
+        
+        return df
+    
+    # Neither column found
+    raise ValueError("Event markers file must have either 'unix_timestamp' or 'timestamp' column")
+
+# Helper function for timezone offset correction
+def find_timestamp_offset(event_markers_df, emotibit_df):
+    """
+    Find the timestamp offset between event markers and emotibit data.
+    Returns the offset in seconds that should be added to emotibit timestamps.
+    """
+    # Get the earliest timestamps from both files
+    event_marker_start = event_markers_df['unix_timestamp'].min()
+    emotibit_start = emotibit_df['LocalTimestamp'].min()
+    
+    # Calculate offset
+    offset = event_marker_start - emotibit_start
+    
+    print(f"Event Marker Start: {event_marker_start} ({datetime.fromtimestamp(event_marker_start)})")
+    print(f"EmotiBit Start: {emotibit_start} ({datetime.fromtimestamp(emotibit_start)})")
+    print(f"Calculated Offset: {offset} seconds ({offset/3600:.2f} hours)")
+    
+    return offset
+
+def match_event_markers_to_biometric(event_markers_df, emotibit_df, offset, tolerance=1.0):
+    """
+    Match event markers to biometric data timestamps.
+    
+    Args:
+        event_markers_df: DataFrame with event markers
+        emotibit_df: DataFrame with biometric data
+        offset: Timestamp offset to apply to emotibit data
+        tolerance: Time tolerance in seconds for matching (default 1.0)
+    
+    Returns:
+        List of matches with event marker info and closest biometric timestamp
+    """
+    matches = []
+    
+    # Apply offset to emotibit timestamps
+    emotibit_df = emotibit_df.copy()
+    emotibit_df['AdjustedTimestamp'] = emotibit_df['LocalTimestamp'] + offset
+    
+    # For each event marker, find the closest biometric timestamp
+    for idx, event_row in event_markers_df.iterrows():
+        event_time = event_row['unix_timestamp']
+        event_marker = event_row['event_marker']
+        condition = event_row.get('condition', 'N/A')
+        
+        # Find closest timestamp in emotibit data
+        time_diffs = (emotibit_df['AdjustedTimestamp'] - event_time).abs()
+        closest_idx = time_diffs.idxmin()
+        closest_time_diff = time_diffs.min()
+        
+        if closest_time_diff <= tolerance:
+            closest_row = emotibit_df.loc[closest_idx]
+            matches.append({
+                'event_marker': event_marker,
+                'condition': condition,
+                'event_timestamp': event_time,
+                'event_iso': event_row.get('iso_timestamp', 'N/A'),
+                'matched_timestamp': closest_row['LocalTimestamp'],
+                'adjusted_timestamp': closest_row['AdjustedTimestamp'],
+                'time_diff': closest_time_diff,
+                'biometric_value': closest_row.iloc[-1],  # Last column is the metric value
+                'row_index': closest_idx
+            })
+        else:
+            print(f"WARNING: No match within tolerance for event '{event_marker}' at {event_time}")
+    
+    return matches
+
+@app.route('/api/test-timestamp-matching', methods=['POST'])
+def test_timestamp_matching():
+    """Test route to verify timestamp offset correction and matching"""
+    try:
+        files = request.files.getlist('files')
+        paths = request.form.getlist('paths')
+        selected_metric = request.form.get('selected_metric')
+        
+        if not selected_metric:
+            return jsonify({'error': 'No metric selected'}), 400
+        
+        if not files or len(files) == 0:
+            return jsonify({'error': 'No files uploaded'}), 400
+        
+        print(f"\n{'='*60}")
+        print(f"TESTING TIMESTAMP MATCHING FOR METRIC: {selected_metric}")
+        print(f"{'='*60}\n")
+        
+        # Organize uploaded files temporarily for testing
+        test_folder = os.path.join(UPLOAD_FOLDER, 'test_temp')
+        if os.path.exists(test_folder):
+            shutil.rmtree(test_folder)
+        os.makedirs(test_folder, exist_ok=True)
+        
+        event_markers_file = None
+        metric_file = None
+        
+        print("Processing uploaded files...")
+        for file, path in zip(files, paths):
+            if not allowed_file(file.filename):
+                continue
+            
+            relative_path = path.split('/', 1)[1] if '/' in path else file.filename
+            file_path = os.path.join(test_folder, relative_path)
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            file.save(file_path)
+            
+            filename_lower = file.filename.lower()
+            path_depth = len(path.split('/'))
+            
+            # Find event markers file
+            if path_depth == 2 and filename_lower.endswith('_event_markers.csv'):
+                event_markers_file = file_path
+                print(f"  Found event markers: {file.filename}")
+            
+            # Find the metric file
+            if f'_{selected_metric}.csv' in file.filename:
+                metric_file = file_path
+                print(f"  Found metric file: {file.filename}")
+        
+        if not event_markers_file:
+            shutil.rmtree(test_folder)
+            return jsonify({'error': 'Event markers file not found in uploaded folder'}), 404
+        
+        if not metric_file:
+            shutil.rmtree(test_folder)
+            return jsonify({'error': f'Could not find file for metric {selected_metric}'}), 404
+        
+        print(f"\nLoading event markers from: {event_markers_file}")
+        event_markers_df = pd.read_csv(event_markers_file)
+        print(f"Event markers shape: {event_markers_df.shape}")
+        print(f"Event markers columns: {event_markers_df.columns.tolist()}\n")
+        
+        # Prepare timestamps (handles backward compatibility)
+        print("Preparing event marker timestamps...")
+        try:
+            event_markers_df = prepare_event_markers_timestamps(event_markers_df)
+        except ValueError as e:
+            shutil.rmtree(test_folder)
+            return jsonify({'error': str(e)}), 400
+        print()
+        
+        print(f"Loading biometric data from: {metric_file}")
+        emotibit_df = pd.read_csv(metric_file)
+        print(f"Biometric data shape: {emotibit_df.shape}")
+        print(f"Biometric data columns: {emotibit_df.columns.tolist()}\n")
+        
+        # Verify required columns exist
+        if 'LocalTimestamp' not in emotibit_df.columns:
+            shutil.rmtree(test_folder)
+            return jsonify({'error': f'LocalTimestamp column not found in {selected_metric} file. Columns: {emotibit_df.columns.tolist()}'}), 400
+        
+        # Calculate offset using ALL timestamps
+        print("Calculating timestamp offset...")
+        offset = find_timestamp_offset(event_markers_df, emotibit_df)
+        print()
+        
+        # Test alignment by sampling timestamps across both files
+        print("Testing timestamp alignment across both continuous streams...")
+        
+        # Apply offset to emotibit timestamps
+        emotibit_df['AdjustedTimestamp'] = emotibit_df['LocalTimestamp'] + offset
+        
+        # Sample timestamps from event markers file (every Nth row for performance)
+        sample_size = min(100, len(event_markers_df))
+        sample_indices = np.linspace(0, len(event_markers_df)-1, sample_size, dtype=int)
+        
+        matches_within_tolerance = 0
+        tolerance = 2.0  # seconds
+        time_diffs = []
+        
+        print(f"Testing {sample_size} sampled timestamps from event marker stream...")
+        for idx in sample_indices:
+            event_time = event_markers_df.iloc[idx]['unix_timestamp']
+            
+            # Find closest timestamp in emotibit data
+            time_diffs_abs = (emotibit_df['AdjustedTimestamp'] - event_time).abs()
+            min_diff = time_diffs_abs.min()
+            time_diffs.append(min_diff)
+            
+            if min_diff <= tolerance:
+                matches_within_tolerance += 1
+        
+        avg_diff = np.mean(time_diffs)
+        max_diff = np.max(time_diffs)
+        min_diff_val = np.min(time_diffs)
+        
+        print(f"\nAlignment Test Results:")
+        print(f"  Sampled {sample_size} timestamps")
+        print(f"  Matches within {tolerance}s tolerance: {matches_within_tolerance}/{sample_size}")
+        print(f"  Average time difference: {avg_diff:.3f}s")
+        print(f"  Min time difference: {min_diff_val:.3f}s")
+        print(f"  Max time difference: {max_diff:.3f}s")
+        print(f"{'='*80}\n")
+        
+        # Clean up test folder
+        shutil.rmtree(test_folder)
+        
+        return jsonify({
+            'message': 'Timestamp alignment test completed',
+            'metric': selected_metric,
+            'offset_seconds': float(offset),
+            'offset_hours': float(offset / 3600),
+            'total_sampled': int(sample_size),
+            'matches_within_tolerance': int(matches_within_tolerance),
+            'avg_time_diff': float(avg_diff),
+            'max_time_diff': float(max_diff),
+            'min_time_diff': float(min_diff_val)
+        }), 200
+        
+    except Exception as e:
+        error_msg = f"Error in timestamp matching test: {str(e)}"
+        print(error_msg)
+        import traceback
+        traceback.print_exc()
+        # Clean up on error
+        test_folder = os.path.join(UPLOAD_FOLDER, 'test_temp')
+        if os.path.exists(test_folder):
+            shutil.rmtree(test_folder)
+        return jsonify({'error': error_msg}), 500
+    
 @app.route('/')
 def serve():
     return send_from_directory(app.static_folder, 'index.html')
