@@ -5,7 +5,7 @@
 }
 
 .header-card {
-  max-width: 1200px;
+  /* max-width: 1200px; */
   margin: 0 auto;
   background-color: white;
   border-radius: 8px;
@@ -605,4 +605,272 @@
   font-style: italic;
   color: #666;
   font-size: 13px;
+}
+
+/* Results Redirect Message */
+.results-redirect-message {
+  max-width: 1200px;
+  margin: 30px auto;
+}
+
+.redirect-card {
+  background-color: white;
+  border-radius: 8px;
+  padding: 40px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  text-align: center;
+}
+
+.redirect-title {
+  font-size: 28px;
+  color: #4CAF50;
+  margin-bottom: 20px;
+  font-weight: 700;
+}
+
+.redirect-text {
+  font-size: 16px;
+  color: #555;
+  line-height: 1.6;
+  margin-bottom: 30px;
+}
+
+.reopen-results-button {
+  padding: 12px 30px;
+  background-color: #2196F3;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.reopen-results-button:hover {
+  background-color: #1976D2;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(33, 150, 243, 0.3);
+}
+
+/* Dynamic Comparison Groups */
+.comparison-groups-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.comparison-group-card {
+  background-color: #f8f9fa;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 20px;
+  position: relative;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.group-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #2c3e50;
+  margin: 0;
+}
+
+.remove-group-btn {
+  background-color: white;
+  border: 1px solid #ddd;
+  border-radius: 10%;
+  width: 18px;
+  height: 18px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+}
+
+.remove-group-btn:hover {
+  background-color: white;
+  /* border-color: red; */
+  transform: scale(1.1);
+}
+
+.group-config {
+  margin-bottom: 15px;
+}
+
+.label-input {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.label-input:focus {
+  outline: none;
+  border-color: #4CAF50;
+  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.1);
+}
+
+.add-group-btn {
+  width: 100%;
+  padding: 15px;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.add-group-btn:hover {
+  background-color: #45a049;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(76, 175, 80, 0.3);
+}
+
+/* Two Column Layout */
+.two-column-layout {
+  display: grid;
+  grid-template-columns: 400px 1fr;
+  gap: 20px;
+  max-width: 1400px;
+  margin: 0 auto;
+  align-items: start;
+}
+
+.left-column {
+  position: sticky;
+  top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.right-column {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Left Column Sections */
+.left-column .file-structure,
+.left-column .event-markers-section,
+.left-column .conditions-section-display {
+  background-color: white;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.event-markers-list,
+.conditions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.event-marker-badge,
+.condition-badge-display {
+  padding: 8px 12px;
+  background-color: #e3f2fd;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #1976d2;
+  font-weight: 500;
+}
+
+/* Right Column - Metrics Section */
+.right-column .metrics-section {
+  background-color: white;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Right Column - Analysis Config */
+.right-column .analysis-config-section {
+  background-color: white;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Right Column - Button and Messages */
+.right-column .analyze-button {
+  width: 100%;
+}
+
+.right-column .status-message,
+.right-column .results-redirect-message {
+  width: 100%;
+}
+
+/* Remove old grid styling from event markers */
+.event-markers-grid,
+.conditions-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Responsive - stack on smaller screens */
+@media (max-width: 1200px) {
+  .two-column-layout {
+    grid-template-columns: 1fr;
+  }
+  
+  .left-column {
+    position: relative;
+    top: 0;
+  }
+}
+
+.file-category {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  margin-bottom: 15px;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.file-category strong {
+  font-size: 14px;
+  color: #2c3e50;
+}
+
+.file-count,
+.file-found,
+.file-missing {
+  font-size: 13px;
+  padding-left: 10px;
+}
+
+.file-count {
+  color: #666;
+}
+
+.file-found {
+  color: #4CAF50;
+}
+
+.file-missing {
+  color: #f44336;
 }

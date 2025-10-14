@@ -51,18 +51,11 @@ def upload_folder_and_analyze():
     folder_name = request.form.get('folder_name', 'subject_data')
     
     # Get analysis configuration
-    selected_metrics_json = request.form.get('selected_metrics', '[]')
-    baseline_window_json = request.form.get('baseline_window', '{}')
-    task_window_json = request.form.get('task_window', '{}')
-    
-    selected_metrics = json.loads(selected_metrics_json)
-    baseline_window = json.loads(baseline_window_json)
-    task_window = json.loads(task_window_json)
+    selected_metrics = json.loads(request.form.get('selected_metrics', '[]'))
+    comparison_groups = json.loads(request.form.get('comparison_groups', '[]'))
     
     print(f"Analysis Configuration:")
     print(f"  Selected Metrics: {selected_metrics}")
-    print(f"  Baseline Window: {baseline_window}")
-    print(f"  Task Window: {task_window}")
     
     if not files or len(files) == 0:
         return jsonify({'error': 'No files in upload'}), 400
@@ -128,8 +121,7 @@ def upload_folder_and_analyze():
         # Add analysis configuration to manifest
         file_manifest['analysis_config'] = {
             'selected_metrics': selected_metrics,
-            'baseline_window': baseline_window,
-            'task_window': task_window
+            'comparison_groups': comparison_groups
         }
         
         manifest_path = os.path.join(subject_folder, 'file_manifest.json')

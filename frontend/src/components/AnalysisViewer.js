@@ -16,19 +16,46 @@ function AnalysisViewer() {
   // const [testResults, setTestResults] = useState(null);
 
   // Analysis Configuration State
-  const [baselineWindow, setBaselineWindow] = useState({
-    eventMarker: '',
-    timeWindowType: 'full', // 'full' or 'custom'
-    customStart: -5,
-    customEnd: 30
-  });
+  const [comparisonGroups, setComparisonGroups] = useState([
+    {
+      id: 1,
+      label: 'Group 1',
+      eventMarker: '',
+      conditionMarker: '',
+      timeWindowType: 'full',
+      customStart: -5,
+      customEnd: 30
+    }
+  ]);
+  const [nextGroupId, setNextGroupId] = useState(2);
 
-  const [taskWindow, setTaskWindow] = useState({
-    eventMarker: '',
-    timeWindowType: 'full',
-    customStart: -5,
-    customEnd: 30
-  });
+  const addComparisonGroup = () => {
+    const newGroup = {
+      id: nextGroupId,
+      label: `Group ${nextGroupId}`,
+      eventMarker: '',
+      conditionMarker: '',
+      timeWindowType: 'full',
+      customStart: -5,
+      customEnd: 30
+    };
+    setComparisonGroups([...comparisonGroups, newGroup]);
+    setNextGroupId(nextGroupId + 1);
+  };
+
+  const removeComparisonGroup = (id) => {
+    if (comparisonGroups.length <= 1) {
+      alert('You must have at least one comparison group');
+      return;
+    }
+    setComparisonGroups(comparisonGroups.filter(group => group.id !== id));
+  };
+
+  const updateComparisonGroup = (id, field, value) => {
+    setComparisonGroups(comparisonGroups.map(group => 
+      group.id === id ? { ...group, [field]: value } : group
+    ));
+  };
 
   const handleFolderSelect = async (e) => {
     const files = Array.from(e.target.files);
@@ -164,28 +191,22 @@ function AnalysisViewer() {
     setSelectedMetrics(noneSelected);
   };
 
-  const updateBaselineWindow = (field, value) => {
-    setBaselineWindow(prev => ({
-      ...prev,
-      [field]: value
-    }));
-  };
-
-  const updateTaskWindow = (field, value) => {
-    setTaskWindow(prev => ({
-      ...prev,
-      [field]: value
-    }));
-  };
-
   const uploadAndAnalyze = async () => {
     if (!fileStructure || !fileStructure.allFiles) {
       setUploadStatus('Please select a subject folder');
       return;
     }
 
-    if (!baselineWindow.eventMarker || !taskWindow.eventMarker) {
-      setUploadStatus('Please select event markers for both baseline and task windows');
+    // Validate that at least 2 groups are configured
+    if (comparisonGroups.length < 2) {
+      setUploadStatus('Please add at least 2 comparison groups');
+      return;
+    }
+
+    // Validate that all groups have event markers selected
+    const missingMarkers = comparisonGroups.filter(g => !g.eventMarker);
+    if (missingMarkers.length > 0) {
+      setUploadStatus('Please select event markers for all comparison groups');
       return;
     }
 
@@ -224,8 +245,7 @@ function AnalysisViewer() {
 
     formData.append('folder_name', selectedFolder);
     formData.append('selected_metrics', JSON.stringify(selectedMetricsList));
-    formData.append('baseline_window', JSON.stringify(baselineWindow));
-    formData.append('task_window', JSON.stringify(taskWindow));
+    formData.append('comparison_groups', JSON.stringify(comparisonGroups));
 
     try {
       setIsAnalyzing(true);
@@ -381,297 +401,237 @@ function AnalysisViewer() {
             </div>
           )}
         </div>
+      </div>
 
-        {fileStructure && (
+      {fileStructure && (
+        <div className="two-column-layout">
           
-          <div className="file-structure">
-            <h3 className="structure-title">Detected Files:</h3>
+          {/* LEFT COLUMN */}
+          <div className="left-column">
             
-            <div className="file-category">
-              <strong>EmotiBit Data:</strong>
-              <span className="file-count">{fileStructure.emotibitFiles.length} files</span>
-            </div>
-
-            <div className="file-category">
-              <strong>Respiration Data:</strong>
-              <span className="file-count">{fileStructure.respirationFiles.length} files</span>
-            </div>
-
-            <div className="file-category">
-              <strong>Event Markers:</strong>
-              <span className={fileStructure.eventMarkersFile ? "file-found" : "file-missing"}>
-                {fileStructure.eventMarkersFile ? `✓ ${fileStructure.eventMarkersFile.name}` : '✗ Not found'}
-              </span>
-            </div>
-
-            <div className="file-category">
-              <strong>SER/Transcription:</strong>
-              <span className={fileStructure.serFile ? "file-found" : "file-missing"}>
-                {fileStructure.serFile ? `✓ ${fileStructure.serFile.name}` : '✗ Not found'}
-              </span>
-            </div>
-          </div>
-        )}
-
-        {availableEventMarkers.length > 0 && (
-          <div className="event-markers-section">
-            <h3 className="structure-title">Available Event Markers ({availableEventMarkers.length})</h3>
-            <div className="event-markers-grid">
-              {availableEventMarkers.map((marker, idx) => (
-                <div key={idx} className="event-marker-badge">
-                  {marker}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {availableConditions.length > 0 && (
-          <div className="conditions-section-display">
-            <h3 className="structure-title">Available Condition Markers ({availableConditions.length})</h3>
-            <div className="conditions-grid">
-              {availableConditions.map((condition, idx) => (
-                <div key={idx} className="condition-badge-display">
-                  {condition}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Analysis Configuration */}
-        {availableEventMarkers.length > 0 && (
-          <div className="analysis-config-section">
-            <h3 className="structure-title">Analysis Configuration</h3>
-            
-            <div className="analysis-windows">
-              {/* Baseline Window */}
-              <div className="analysis-window">
-                <h4 className="window-title">Baseline Window</h4>
-                
-                <div className="window-config">
-                  <label className="config-label">Event Marker:</label>
-                  <select 
-                    className="config-select"
-                    value={baselineWindow.eventMarker}
-                    onChange={(e) => updateBaselineWindow('eventMarker', e.target.value)}
-                  >
-                    <option value="">Select event marker...</option>
-                    {availableEventMarkers.map(marker => (
-                      <option key={marker} value={marker}>{marker}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="window-config">
-                  <label className="config-label">Time Window:</label>
-                  <div className="radio-group">
-                    <label className="radio-label">
-                      <input
-                        type="radio"
-                        checked={baselineWindow.timeWindowType === 'full'}
-                        onChange={() => updateBaselineWindow('timeWindowType', 'full')}
-                      />
-                      <span>Full event duration</span>
-                    </label>
-                    <label className="radio-label">
-                      <input
-                        type="radio"
-                        checked={baselineWindow.timeWindowType === 'custom'}
-                        onChange={() => updateBaselineWindow('timeWindowType', 'custom')}
-                      />
-                      <span>Custom offset</span>
-                    </label>
-                  </div>
-                  
-                  {baselineWindow.timeWindowType === 'custom' && (
-                    <div className="custom-time-inputs">
-                      <div className="time-input-group">
-                        <label>Start:</label>
-                        <input
-                          type="number"
-                          value={baselineWindow.customStart}
-                          onChange={(e) => updateBaselineWindow('customStart', parseFloat(e.target.value))}
-                          className="time-input"
-                        />
-                        <span>seconds</span>
-                      </div>
-                      <div className="time-input-group">
-                        <label>End:</label>
-                        <input
-                          type="number"
-                          value={baselineWindow.customEnd}
-                          onChange={(e) => updateBaselineWindow('customEnd', parseFloat(e.target.value))}
-                          className="time-input"
-                        />
-                        <span>seconds</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
+            {/* Detected Files */}
+            <div className="file-structure">
+              <h3 className="structure-title">Detected Files:</h3>
+              
+              <div className="file-category">
+                <strong>EmotiBit Data:</strong>
+                <span className="file-count">{fileStructure.emotibitFiles.length} files</span>
               </div>
 
-              {/* Task Window */}
-              <div className="analysis-window">
-                <h4 className="window-title">Task Window</h4>
-                
-                <div className="window-config">
-                  <label className="config-label">Event Marker:</label>
-                  <select 
-                    className="config-select"
-                    value={taskWindow.eventMarker}
-                    onChange={(e) => updateTaskWindow('eventMarker', e.target.value)}
-                  >
-                    <option value="">Select event marker...</option>
-                    {availableEventMarkers.map(marker => (
-                      <option key={marker} value={marker}>{marker}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="window-config">
-                  <label className="config-label">Time Window:</label>
-                  <div className="radio-group">
-                    <label className="radio-label">
-                      <input
-                        type="radio"
-                        checked={taskWindow.timeWindowType === 'full'}
-                        onChange={() => updateTaskWindow('timeWindowType', 'full')}
-                      />
-                      <span>Full event duration</span>
-                    </label>
-                    <label className="radio-label">
-                      <input
-                        type="radio"
-                        checked={taskWindow.timeWindowType === 'custom'}
-                        onChange={() => updateTaskWindow('timeWindowType', 'custom')}
-                      />
-                      <span>Custom offset</span>
-                    </label>
-                  </div>
-                  
-                  {taskWindow.timeWindowType === 'custom' && (
-                    <div className="custom-time-inputs">
-                      <div className="time-input-group">
-                        <label>Start:</label>
-                        <input
-                          type="number"
-                          value={taskWindow.customStart}
-                          onChange={(e) => updateTaskWindow('customStart', parseFloat(e.target.value))}
-                          className="time-input"
-                        />
-                        <span>seconds</span>
-                      </div>
-                      <div className="time-input-group">
-                        <label>End:</label>
-                        <input
-                          type="number"
-                          value={taskWindow.customEnd}
-                          onChange={(e) => updateTaskWindow('customEnd', parseFloat(e.target.value))}
-                          className="time-input"
-                        />
-                        <span>seconds</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
+              <div className="file-category">
+                <strong>Respiration Data:</strong>
+                <span className="file-count">{fileStructure.respirationFiles.length} files</span>
               </div>
-            </div>
-          </div>
-        )}
 
-        {/* Metrics Selection */}
-        {availableMetrics.length > 0 && (
-          <div className="metrics-section">
-            <div className="metrics-header">
-              <h3 className="structure-title">Available Biometric Metrics ({availableMetrics.length})</h3>
-              <div className="metrics-controls">
-                <button onClick={handleSelectAll} className="metric-control-btn">
-                  Select All
-                </button>
-                <button onClick={handleDeselectAll} className="metric-control-btn">
-                  Deselect All
-                </button>
-                <span className="selected-count">
-                  {getSelectedCount()} selected
+              <div className="file-category">
+                <strong>Event Markers:</strong>
+                <span className={fileStructure.eventMarkersFile ? "file-found" : "file-missing"}>
+                  {fileStructure.eventMarkersFile ? `✓ ${fileStructure.eventMarkersFile.name}` : '✗ Not found'}
+                </span>
+              </div>
+
+              <div className="file-category">
+                <strong>SER/Transcription:</strong>
+                <span className={fileStructure.serFile ? "file-found" : "file-missing"}>
+                  {fileStructure.serFile ? `✓ ${fileStructure.serFile.name}` : '✗ Not found'}
                 </span>
               </div>
             </div>
-            
-            <div className="metrics-grid">
-              {availableMetrics.map(metric => (
-                <label key={metric} className="metric-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={selectedMetrics[metric] || false}
-                    onChange={() => handleMetricToggle(metric)}
-                  />
-                  <span className="metric-label">{metric}</span>
-                </label>
-              ))}
-            </div>
+
           </div>
-        )}
-        {/* {availableMetrics.length > 0 && getSelectedCount() > 0 && (
-          <div className="test-section">
-            <button 
-              onClick={testTimestampMatching}
-              disabled={isTesting || isAnalyzing}
-              className={`test-button ${isTesting || isAnalyzing ? 'disabled' : ''}`}
-            >
-              {isTesting ? '🔍 Testing...' : '🧪 Test Timestamp Matching'}
-            </button>
-            {testResults && (
-              <div className="test-results-summary">
-                <strong>Test Results:</strong>
-                <div>Metric: {testResults.metric}</div>
-                <div>Offset: {testResults.offset_seconds.toFixed(2)}s ({testResults.offset_hours.toFixed(2)} hours)</div>
-                <div>Matches Found: {testResults.total_matches}</div>
-                {testResults.total_matches > 0 && (
-                  <>
-                    <div>Avg Time Diff: {testResults.avg_time_diff.toFixed(3)}s</div>
-                    <div>Max Time Diff: {testResults.max_time_diff.toFixed(3)}s</div>
-                    <div>Min Time Diff: {testResults.min_time_diff.toFixed(3)}s</div>
-                  </>
-                )}
-                <div className="test-note">See terminal for full match details</div>
+
+          {/* RIGHT COLUMN */}
+          <div className="right-column">
+            
+            {/* Metrics Selection */}
+            {availableMetrics.length > 0 && (
+              <div className="metrics-section">
+                <div className="metrics-header">
+                  <h3 className="structure-title">Available Biometric Metrics ({availableMetrics.length})</h3>
+                  <div className="metrics-controls">
+                    <button onClick={handleSelectAll} className="metric-control-btn">
+                      Select All
+                    </button>
+                    <button onClick={handleDeselectAll} className="metric-control-btn">
+                      Deselect All
+                    </button>
+                    <span className="selected-count">
+                      {getSelectedCount()} selected
+                    </span>
+                  </div>
+                </div>
+                
+                <div className="metrics-grid">
+                  {availableMetrics.map(metric => (
+                    <label key={metric} className="metric-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={selectedMetrics[metric] || false}
+                        onChange={() => handleMetricToggle(metric)}
+                      />
+                      <span className="metric-label">{metric}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
             )}
-          </div>
-        )} */}
 
-        <button 
-          onClick={uploadAndAnalyze}
-          disabled={isAnalyzing || !fileStructure || isScanning}
-          className={`analyze-button ${isAnalyzing || !fileStructure || isScanning ? 'disabled' : ''}`}
-        >
-          {isAnalyzing ? '⏳ Analyzing...' : isScanning ? '🔍 Scanning...' : 'Run Analysis'}
-        </button>
+            {/* Analysis Configuration */}
+            {availableEventMarkers.length > 0 && (
+              <div className="analysis-config-section">
+                <h3 className="structure-title">Analysis Configuration</h3>
+                
+                <div className="comparison-groups-container">
+                  {comparisonGroups.map((group, index) => (
+                    <div key={group.id} className="comparison-group-card">
+                      <div className="card-header">
+                        <h4 className="group-title">Comparison Group {index + 1}</h4>
+                        {comparisonGroups.length > 1 && (
+                          <button 
+                            onClick={() => removeComparisonGroup(group.id)}
+                            className="remove-group-btn"
+                            title="Remove this group"
+                          >
+                            ✖️
+                          </button>
+                        )}
+                      </div>
 
-        {uploadStatus && (
-          <div className={`status-message ${uploadStatus.includes('Error') ? 'error' : 'success'}`}>
-            {uploadStatus}
-          </div>
-        )}
-      </div>
+                      <div className="group-config">
+                        <label className="config-label">Label:</label>
+                        <input
+                          type="text"
+                          className="label-input"
+                          value={group.label}
+                          onChange={(e) => updateComparisonGroup(group.id, 'label', e.target.value)}
+                          placeholder="Enter group name..."
+                        />
+                      </div>
 
-      {results && (
-        <div className="results-redirect-message">
-          <div className="redirect-card">
-            <h2 className="redirect-title">✅ Analysis Complete!</h2>
-            <p className="redirect-text">
-              Your analysis results have been opened in a new tab. 
-              If the tab did not open automatically, please check your browser's pop-up settings.
-            </p>
+                      <div className="group-config">
+                        <label className="config-label">Event Marker:</label>
+                        <select 
+                          className="config-select"
+                          value={group.eventMarker}
+                          onChange={(e) => updateComparisonGroup(group.id, 'eventMarker', e.target.value)}
+                        >
+                          <option value="">Select event marker...</option>
+                          {availableEventMarkers.map(marker => (
+                            <option key={marker} value={marker}>{marker}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="group-config">
+                        <label className="config-label">Condition Marker:</label>
+                        <select 
+                          className="config-select"
+                          value={group.conditionMarker}
+                          onChange={(e) => updateComparisonGroup(group.id, 'conditionMarker', e.target.value)}
+                        >
+                          <option value="">All conditions</option>
+                          {availableConditions.map(condition => (
+                            <option key={condition} value={condition}>{condition}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="group-config">
+                        <label className="config-label">Time Window:</label>
+                        <div className="radio-group">
+                          <label className="radio-label">
+                            <input
+                              type="radio"
+                              checked={group.timeWindowType === 'full'}
+                              onChange={() => updateComparisonGroup(group.id, 'timeWindowType', 'full')}
+                            />
+                            <span>Full event duration</span>
+                          </label>
+                          <label className="radio-label">
+                            <input
+                              type="radio"
+                              checked={group.timeWindowType === 'custom'}
+                              onChange={() => updateComparisonGroup(group.id, 'timeWindowType', 'custom')}
+                            />
+                            <span>Custom offset</span>
+                          </label>
+                        </div>
+                        
+                        {group.timeWindowType === 'custom' && (
+                          <div className="custom-time-inputs">
+                            <div className="time-input-group">
+                              <label>Start:</label>
+                              <input
+                                type="number"
+                                value={group.customStart}
+                                onChange={(e) => updateComparisonGroup(group.id, 'customStart', parseFloat(e.target.value))}
+                                className="time-input"
+                              />
+                              <span>seconds</span>
+                            </div>
+                            <div className="time-input-group">
+                              <label>End:</label>
+                              <input
+                                type="number"
+                                value={group.customEnd}
+                                onChange={(e) => updateComparisonGroup(group.id, 'customEnd', parseFloat(e.target.value))}
+                                className="time-input"
+                              />
+                              <span>seconds</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+
+                  <button 
+                    onClick={addComparisonGroup}
+                    className="add-group-btn"
+                  >
+                    + Add Comparison Group
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Run Analysis Button */}
             <button 
-              onClick={() => {
-                sessionStorage.setItem('analysisResults', JSON.stringify(results));
-                window.open('/results', '_blank');
-              }}
-              className="reopen-results-button"
+              onClick={uploadAndAnalyze}
+              disabled={isAnalyzing || !fileStructure || isScanning}
+              className={`analyze-button ${isAnalyzing || !fileStructure || isScanning ? 'disabled' : ''}`}
             >
-              🔄 Re-open Results Tab
+              {isAnalyzing ? '⏳ Analyzing...' : isScanning ? '🔍 Scanning...' : 'Run Analysis'}
             </button>
+
+            {/* Status Messages */}
+            {uploadStatus && (
+              <div className={`status-message ${uploadStatus.includes('Error') ? 'error' : 'success'}`}>
+                {uploadStatus}
+              </div>
+            )}
+
+            {/* Results Redirect */}
+            {results && (
+              <div className="results-redirect-message">
+                <div className="redirect-card">
+                  <h2 className="redirect-title">✅ Analysis Complete!</h2>
+                  <p className="redirect-text">
+                    Your analysis results have been opened in a new tab. 
+                    If the tab did not open automatically, please check your browser's pop-up settings.
+                  </p>
+                  <button 
+                    onClick={() => {
+                      sessionStorage.setItem('analysisResults', JSON.stringify(results));
+                      window.open('/results', '_blank');
+                    }}
+                    className="reopen-results-button"
+                  >
+                    🔄 Re-open Results Tab
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

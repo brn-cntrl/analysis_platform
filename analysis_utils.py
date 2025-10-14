@@ -129,7 +129,7 @@ def extract_window_data(emotibit_df, event_markers_df, offset, window_config):
         emotibit_df: DataFrame with biometric data
         event_markers_df: DataFrame with event markers
         offset: Timestamp offset to apply
-        window_config: Dict with 'eventMarker', 'timeWindowType', 'customStart', 'customEnd'
+        window_config: Dict with 'eventMarker', 'conditionMarker', 'timeWindowType', 'customStart', 'customEnd'
     
     Returns:
         DataFrame with data from the specified window
@@ -145,11 +145,21 @@ def extract_window_data(emotibit_df, event_markers_df, offset, window_config):
     event_marker = window_config['eventMarker']
     marker_rows = event_markers_df[event_markers_df['event_marker'] == event_marker]
     
+    # Filter by condition marker if specified
+    condition_marker = window_config.get('conditionMarker', '')
+    if condition_marker and condition_marker != '':
+        if 'condition' in event_markers_df.columns:
+            marker_rows = marker_rows[marker_rows['condition'] == condition_marker]
+        else:
+            print(f"  ⚠ Warning: Condition column not found in event markers")
+    
     if len(marker_rows) == 0:
-        print(f"  ⚠ Warning: No occurrences of event marker '{event_marker}' found")
+        print(f"  ⚠ Warning: No occurrences of event marker '{event_marker}'" + 
+              (f" with condition '{condition_marker}'" if condition_marker else "") + " found")
         return pd.DataFrame()
     
-    print(f"  Found {len(marker_rows)} occurrences of '{event_marker}'")
+    print(f"  Found {len(marker_rows)} occurrences of '{event_marker}'" +
+          (f" with condition '{condition_marker}'" if condition_marker else ""))
     
     # Extract data for each occurrence
     all_data = []
@@ -187,6 +197,7 @@ def extract_window_data(emotibit_df, event_markers_df, offset, window_config):
         if len(window_data) > 0:
             all_data.append(window_data)
     
+    # Concatenate all windows
     if len(all_data) == 0:
         return pd.DataFrame()
     

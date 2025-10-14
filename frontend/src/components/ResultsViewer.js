@@ -107,34 +107,28 @@ function ResultsViewer() {
         
         {/* Analysis Results */}
         {results.analysis && Object.keys(results.analysis).length > 0 && (
-          <div className="result-card">
+        <div className="result-card">
             <h2 className="card-title">Analysis Results</h2>
-            {Object.entries(results.analysis).map(([metric, data]) => (
-              <div key={metric} className="metric-analysis">
+            {Object.entries(results.analysis).map(([metric, groupData]) => (
+            <div key={metric} className="metric-analysis">
                 <h3 className="section-title">{metric}</h3>
                 <div className="stats-grid">
-                  <div className="stat-card stat-mean">
-                    <div className="stat-label">Baseline Mean</div>
-                    <div className="stat-value">{data.baseline.mean.toFixed(2)}</div>
-                    <div className="stat-detail">n={data.baseline.count}</div>
-                  </div>
-                  <div className="stat-card stat-std">
-                    <div className="stat-label">Task Mean</div>
-                    <div className="stat-value">{data.task.mean.toFixed(2)}</div>
-                    <div className="stat-detail">n={data.task.count}</div>
-                  </div>
-                  <div className="stat-card stat-min">
-                    <div className="stat-label">Difference</div>
-                    <div className="stat-value">{data.difference.toFixed(2)}</div>
-                  </div>
-                  <div className="stat-card stat-max">
-                    <div className="stat-label">% Change</div>
-                    <div className="stat-value">{data.percent_change.toFixed(2)}%</div>
-                  </div>
+                {Object.entries(groupData).map(([groupLabel, stats]) => (
+                    <div key={groupLabel} className="stat-card">
+                    <div className="stat-label">{groupLabel}</div>
+                    <div className="stat-value">{stats.mean.toFixed(2)}</div>
+                    <div className="stat-detail">
+                        ±{stats.std.toFixed(2)} | n={stats.count}
+                    </div>
+                    <div className="stat-range">
+                        Range: {stats.min.toFixed(2)} - {stats.max.toFixed(2)}
+                    </div>
+                    </div>
+                ))}
                 </div>
-              </div>
+            </div>
             ))}
-          </div>
+        </div>
         )}
 
         {/* Visualizations */}
