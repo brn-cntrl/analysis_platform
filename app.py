@@ -18,6 +18,7 @@ from analysis_utils import (
 )
 
 app = Flask(__name__, static_folder='frontend/build', static_url_path='')
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max
 CORS(app)
 
 UPLOAD_FOLDER = 'data'
