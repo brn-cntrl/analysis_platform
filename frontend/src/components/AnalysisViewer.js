@@ -12,8 +12,8 @@ function AnalysisViewer() {
   const [isScanning, setIsScanning] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [results, setResults] = useState(null);
-  const [isTesting, setIsTesting] = useState(false);
-  const [testResults, setTestResults] = useState(null);
+  // const [isTesting, setIsTesting] = useState(false);
+  // const [testResults, setTestResults] = useState(null);
 
   // Analysis Configuration State
   const [baselineWindow, setBaselineWindow] = useState({
@@ -197,9 +197,29 @@ function AnalysisViewer() {
 
     const formData = new FormData();
 
-    fileStructure.allFiles.forEach(file => {
+    const filesToUpload = [];
+    const pathsToUpload = [];
+    
+    if (fileStructure.eventMarkersFile) {
+      filesToUpload.push(fileStructure.eventMarkersFile.file);
+      pathsToUpload.push(fileStructure.eventMarkersFile.path);
+    }
+    
+    selectedMetricsList.forEach(metric => {
+      const metricFile = fileStructure.emotibitFiles.find(f => 
+        f.name.includes(`_${metric}.csv`)
+      );
+      if (metricFile) {
+        filesToUpload.push(metricFile.file);
+        pathsToUpload.push(metricFile.path);
+      }
+    });
+    
+    console.log(`Uploading ${filesToUpload.length} files for analysis:`, pathsToUpload.map(p => p.split('/').pop()));
+    
+    filesToUpload.forEach((file, index) => {
       formData.append('files', file);
-      formData.append('paths', file.webkitRelativePath);
+      formData.append('paths', pathsToUpload[index]);
     });
 
     formData.append('folder_name', selectedFolder);
@@ -217,15 +237,38 @@ function AnalysisViewer() {
         body: formData,
       });
 
-      const data = await response.json();
+      // Get the raw response text first
+      const responseText = await response.text();
+      console.log('Raw response:', responseText);
+      
+      // Try to parse it as JSON
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error('JSON parse error:', parseError);
+        console.error('Response text:', responseText);
+        setUploadStatus(`Error: Invalid JSON response from server. Check console for details.`);
+        return;
+      }
       
       if (response.ok) {
         setUploadStatus('Analysis completed successfully!');
         setResults(data.results);
+
+        sessionStorage.setItem('analysisResults', JSON.stringify(data.results));
+
+        const resultsWindow = window.open('/results', '_blank');
+
+        if (!resultsWindow) {
+          setUploadStatus('Analysis completed! Please allow pop-ups to view results.');
+        }
+
       } else {
         setUploadStatus(`Error: ${data.error}`);
       }
     } catch (error) {
+      console.error('Fetch error:', error);
       setUploadStatus(`Error: ${error.message}`);
     } finally {
       setIsAnalyzing(false);
@@ -236,84 +279,84 @@ function AnalysisViewer() {
     return Object.values(selectedMetrics).filter(val => val).length;
   };
 
-  const testTimestampMatching = async () => {
-    const selectedMetricsList = Object.keys(selectedMetrics).filter(m => selectedMetrics[m]);
+  // const testTimestampMatching = async () => {
+  //   const selectedMetricsList = Object.keys(selectedMetrics).filter(m => selectedMetrics[m]);
     
-    if (selectedMetricsList.length === 0) {
-      setUploadStatus('Please select at least one biometric metric to test');
-      return;
-    }
+  //   if (selectedMetricsList.length === 0) {
+  //     setUploadStatus('Please select at least one biometric metric to test');
+  //     return;
+  //   }
 
-    if (!fileStructure || !fileStructure.allFiles) {
-      setUploadStatus('Please select a subject folder first');
-      return;
-    }
+  //   if (!fileStructure || !fileStructure.allFiles) {
+  //     setUploadStatus('Please select a subject folder first');
+  //     return;
+  //   }
 
-    // Use the first selected metric for testing
-    const metricToTest = selectedMetricsList[0];
+  //   // Use the first selected metric for testing
+  //   const metricToTest = selectedMetricsList[0];
 
-    try {
-      setIsTesting(true);
-      setUploadStatus(`Testing timestamp matching for ${metricToTest}...`);
-      setTestResults(null);
+  //   try {
+  //     setIsTesting(true);
+  //     setUploadStatus(`Testing timestamp matching for ${metricToTest}...`);
+  //     setTestResults(null);
 
-      const formData = new FormData();
+  //     const formData = new FormData();
       
-      // Only upload the files we need for testing
-      const filesToUpload = [];
-      const pathsToUpload = [];
+  //     // Only upload the files we need for testing
+  //     const filesToUpload = [];
+  //     const pathsToUpload = [];
       
-      // Find and add the event markers file
-      if (fileStructure.eventMarkersFile) {
-        filesToUpload.push(fileStructure.eventMarkersFile.file);
-        pathsToUpload.push(fileStructure.eventMarkersFile.path);
-      }
+  //     // Find and add the event markers file
+  //     if (fileStructure.eventMarkersFile) {
+  //       filesToUpload.push(fileStructure.eventMarkersFile.file);
+  //       pathsToUpload.push(fileStructure.eventMarkersFile.path);
+  //     }
       
-      // Find and add the specific metric file
-      const metricFile = fileStructure.emotibitFiles.find(f => 
-        f.name.includes(`_${metricToTest}.csv`)
-      );
+  //     // Find and add the specific metric file
+  //     const metricFile = fileStructure.emotibitFiles.find(f => 
+  //       f.name.includes(`_${metricToTest}.csv`)
+  //     );
       
-      if (metricFile) {
-        filesToUpload.push(metricFile.file);
-        pathsToUpload.push(metricFile.path);
-      }
+  //     if (metricFile) {
+  //       filesToUpload.push(metricFile.file);
+  //       pathsToUpload.push(metricFile.path);
+  //     }
       
-      if (filesToUpload.length !== 2) {
-        setUploadStatus(`Error: Could not find required files (event markers and ${metricToTest})`);
-        setIsTesting(false);
-        return;
-      }
+  //     if (filesToUpload.length !== 2) {
+  //       setUploadStatus(`Error: Could not find required files (event markers and ${metricToTest})`);
+  //       setIsTesting(false);
+  //       return;
+  //     }
       
-      console.log(`Uploading ${filesToUpload.length} files for testing:`, pathsToUpload);
+  //     console.log(`Uploading ${filesToUpload.length} files for testing:`, pathsToUpload);
       
-      // Add only the necessary files
-      filesToUpload.forEach((file, index) => {
-        formData.append('files', file);
-        formData.append('paths', pathsToUpload[index]);
-      });
+  //     // Add only the necessary files
+  //     filesToUpload.forEach((file, index) => {
+  //       formData.append('files', file);
+  //       formData.append('paths', pathsToUpload[index]);
+  //     });
       
-      formData.append('selected_metric', metricToTest);
+  //     formData.append('selected_metric', metricToTest);
 
-      const response = await fetch('/api/test-timestamp-matching', {
-        method: 'POST',
-        body: formData,
-      });
+  //     const response = await fetch('/api/test-timestamp-matching', {
+  //       method: 'POST',
+  //       body: formData,
+  //     });
 
-      const data = await response.json();
+  //     const data = await response.json();
       
-      if (response.ok) {
-        setUploadStatus(`Test completed! Found ${data.total_matches} matches. Check terminal for details.`);
-        setTestResults(data);
-      } else {
-        setUploadStatus(`Error: ${data.error}`);
-      }
-    } catch (error) {
-      setUploadStatus(`Error: ${error.message}`);
-    } finally {
-      setIsTesting(false);
-    }
-  };
+  //     if (response.ok) {
+  //       setUploadStatus(`Test completed! Found ${data.total_matches} matches. Check terminal for details.`);
+  //       setTestResults(data);
+  //     } else {
+  //       setUploadStatus(`Error: ${data.error}`);
+  //     }
+  //   } catch (error) {
+  //     setUploadStatus(`Error: ${error.message}`);
+  //   } finally {
+  //     setIsTesting(false);
+  //   }
+  // };
 
   return (
     <div className="container">
@@ -340,6 +383,7 @@ function AnalysisViewer() {
         </div>
 
         {fileStructure && (
+          
           <div className="file-structure">
             <h3 className="structure-title">Detected Files:</h3>
             
@@ -371,7 +415,7 @@ function AnalysisViewer() {
 
         {availableEventMarkers.length > 0 && (
           <div className="event-markers-section">
-            <h3 className="structure-title">Event Markers ({availableEventMarkers.length})</h3>
+            <h3 className="structure-title">Available Event Markers ({availableEventMarkers.length})</h3>
             <div className="event-markers-grid">
               {availableEventMarkers.map((marker, idx) => (
                 <div key={idx} className="event-marker-badge">
@@ -384,7 +428,7 @@ function AnalysisViewer() {
 
         {availableConditions.length > 0 && (
           <div className="conditions-section-display">
-            <h3 className="structure-title">Conditions ({availableConditions.length})</h3>
+            <h3 className="structure-title">Available Condition Markers ({availableConditions.length})</h3>
             <div className="conditions-grid">
               {availableConditions.map((condition, idx) => (
                 <div key={idx} className="condition-badge-display">
@@ -568,7 +612,7 @@ function AnalysisViewer() {
             </div>
           </div>
         )}
-        {availableMetrics.length > 0 && getSelectedCount() > 0 && (
+        {/* {availableMetrics.length > 0 && getSelectedCount() > 0 && (
           <div className="test-section">
             <button 
               onClick={testTimestampMatching}
@@ -594,7 +638,7 @@ function AnalysisViewer() {
               </div>
             )}
           </div>
-        )}
+        )} */}
 
         <button 
           onClick={uploadAndAnalyze}
@@ -612,125 +656,23 @@ function AnalysisViewer() {
       </div>
 
       {results && (
-        <div className="results-container">
-          <div className="result-card">
-            <h2 className="card-title">Ground Truth Data</h2>
-            <p className="data-info">
-              <strong>Shape:</strong> {results.ground_truth.shape[0]} rows × {results.ground_truth.shape[1]} columns
+        <div className="results-redirect-message">
+          <div className="redirect-card">
+            <h2 className="redirect-title">✅ Analysis Complete!</h2>
+            <p className="redirect-text">
+              Your analysis results have been opened in a new tab. 
+              If the tab did not open automatically, please check your browser's pop-up settings.
             </p>
-            
-            {results.ground_truth.stats && (
-              <div className="stats-grid">
-                <div className="stat-card stat-mean">
-                  <div className="stat-label">Mean</div>
-                  <div className="stat-value">
-                    {results.ground_truth.stats.mean.toFixed(2)}
-                  </div>
-                </div>
-                <div className="stat-card stat-std">
-                  <div className="stat-label">Std Dev</div>
-                  <div className="stat-value">
-                    {results.ground_truth.stats.std.toFixed(2)}
-                  </div>
-                </div>
-                <div className="stat-card stat-min">
-                  <div className="stat-label">Min</div>
-                  <div className="stat-value">
-                    {results.ground_truth.stats.min.toFixed(2)}
-                  </div>
-                </div>
-                <div className="stat-card stat-max">
-                  <div className="stat-label">Max</div>
-                  <div className="stat-value">
-                    {results.ground_truth.stats.max.toFixed(2)}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <h3 className="section-title">First 10 Rows</h3>
-            <div className="table-container">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    {results.ground_truth.columns.map((col, idx) => (
-                      <th key={idx}>{col}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {results.ground_truth.head.map((row, idx) => (
-                    <tr key={idx}>
-                      {results.ground_truth.columns.map((col, colIdx) => (
-                        <td key={colIdx}>
-                          {typeof row[col] === 'number' ? row[col].toFixed(3) : row[col]}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <button 
+              onClick={() => {
+                sessionStorage.setItem('analysisResults', JSON.stringify(results));
+                window.open('/results', '_blank');
+              }}
+              className="reopen-results-button"
+            >
+              🔄 Re-open Results Tab
+            </button>
           </div>
-
-          <div className="result-card">
-            <h2 className="card-title">Event Markers</h2>
-            <p className="data-info">
-              <strong>Shape:</strong> {results.markers.shape[0]} rows × {results.markers.shape[1]} columns
-            </p>
-
-            {results.markers.conditions && (
-              <div className="conditions-section">
-                <h3 className="section-title">Conditions</h3>
-                <div className="conditions-container">
-                  {Object.entries(results.markers.conditions).map(([condition, count]) => (
-                    <div key={condition} className="condition-badge">
-                      <strong>{condition}:</strong> {count}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <h3 className="section-title">First 10 Rows</h3>
-            <div className="table-container">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    {results.markers.columns.map((col, idx) => (
-                      <th key={idx}>{col}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {results.markers.head.map((row, idx) => (
-                    <tr key={idx}>
-                      {results.markers.columns.map((col, colIdx) => (
-                        <td key={colIdx}>{row[col]}</td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {results.plots && results.plots.length > 0 && (
-            <div className="result-card">
-              <h2 className="card-title">Visualizations</h2>
-              {results.plots.map((plot, idx) => (
-                <div key={idx} className="plot-container">
-                  <h3 className="plot-title">{plot.name}</h3>
-                  <img 
-                    src={plot.url} 
-                    alt={plot.name}
-                    className="plot-image"
-                  />
-                </div>
-              ))}
-            </div>
-          )}
-
         </div>
       )}
     </div>
