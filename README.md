@@ -18,6 +18,11 @@ A web-based platform for analyzing EmotiBit biometric data with interactive visu
 - npm or yarn
 - Jupyter Notebook
 
+## Expected File Names and Paths
+- Event marker file names should be appended with "_event_markers.csv" and placed in the root of the subject's data folder.
+- EmotiBit ground truth files are expected to be parsed and all resulting csv files should be appended "_TAGNAME.csv" (e.g. "_HR.csv") and be found in subject_data/emotibit_data
+- Respiration csv file names should be appended "respiratory_data_FILE#.csv" (e.g. "respiratory_data_0.csv) and be found in subject_data/respiratory_data
+
 ## Installation
 
 ### 1. Clone the Repository
