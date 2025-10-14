@@ -11,6 +11,12 @@ import io
 from datetime import datetime
 import numpy as np
 
+from analysis_utils import (
+    prepare_event_markers_timestamps,
+    find_timestamp_offset,
+    match_event_markers_to_biometric
+)
+
 app = Flask(__name__, static_folder='frontend/build', static_url_path='')
 CORS(app)
 
@@ -353,128 +359,6 @@ def scan_folder_data():
         import traceback
         traceback.print_exc()
         return jsonify({'error': error_msg}), 500
-
-def prepare_event_markers_timestamps(event_markers_df):
-    """
-    Prepare event markers dataframe to ensure it has unix_timestamp column.
-    Handles backward compatibility for files that use 'timestamp' with ISO format.
-    
-    Returns: Modified dataframe with 'unix_timestamp' column
-    """
-    df = event_markers_df.copy()
-    
-    # Check if unix_timestamp already exists
-    if 'unix_timestamp' in df.columns:
-        print("Found 'unix_timestamp' column - using as-is")
-        return df
-    
-    # Check for 'timestamp' column (backward compatibility)
-    if 'timestamp' in df.columns:
-        print("Found 'timestamp' column (ISO format) - converting to unix_timestamp")
-        
-        # Convert ISO format timestamps to Unix timestamps
-        dt_series = pd.to_datetime(df['timestamp'], errors='coerce')
-        
-        # Convert to Unix timestamp
-        df['unix_timestamp'] = (dt_series - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s')
-        
-        # Debug: Check for bad values
-        print(f"After conversion:")
-        print(f"  Total rows: {len(df)}")
-        print(f"  NaN values: {df['unix_timestamp'].isna().sum()}")
-        print(f"  Min value: {df['unix_timestamp'].min()}")
-        print(f"  Max value: {df['unix_timestamp'].max()}")
-        
-        # Drop NaN values
-        before = len(df)
-        df = df.dropna(subset=['unix_timestamp'])
-        after = len(df)
-        
-        if before > after:
-            print(f"Dropped {before - after} rows with invalid timestamps")
-        
-        # Debug: Check again after dropna
-        print(f"After dropna:")
-        print(f"  Total rows: {len(df)}")
-        print(f"  Min value: {df['unix_timestamp'].min()}")
-        print(f"  Max value: {df['unix_timestamp'].max()}")
-        
-        print(f"Successfully converted {after} timestamps from ISO to Unix format")
-        print(f"Sample conversions:")
-        for i in range(min(3, len(df))):
-            print(f"  {df.iloc[i]['timestamp']} → {df.iloc[i]['unix_timestamp']:.6f}")
-        
-        return df
-    
-    # Neither column found
-    raise ValueError("Event markers file must have either 'unix_timestamp' or 'timestamp' column")
-
-# Helper function for timezone offset correction
-def find_timestamp_offset(event_markers_df, emotibit_df):
-    """
-    Find the timestamp offset between event markers and emotibit data.
-    Returns the offset in seconds that should be added to emotibit timestamps.
-    """
-    # Get the earliest timestamps from both files
-    event_marker_start = event_markers_df['unix_timestamp'].min()
-    emotibit_start = emotibit_df['LocalTimestamp'].min()
-    
-    # Calculate offset
-    offset = event_marker_start - emotibit_start
-    
-    print(f"Event Marker Start: {event_marker_start} ({datetime.fromtimestamp(event_marker_start)})")
-    print(f"EmotiBit Start: {emotibit_start} ({datetime.fromtimestamp(emotibit_start)})")
-    print(f"Calculated Offset: {offset} seconds ({offset/3600:.2f} hours)")
-    
-    return offset
-
-def match_event_markers_to_biometric(event_markers_df, emotibit_df, offset, tolerance=1.0):
-    """
-    Match event markers to biometric data timestamps.
-    
-    Args:
-        event_markers_df: DataFrame with event markers
-        emotibit_df: DataFrame with biometric data
-        offset: Timestamp offset to apply to emotibit data
-        tolerance: Time tolerance in seconds for matching (default 1.0)
-    
-    Returns:
-        List of matches with event marker info and closest biometric timestamp
-    """
-    matches = []
-    
-    # Apply offset to emotibit timestamps
-    emotibit_df = emotibit_df.copy()
-    emotibit_df['AdjustedTimestamp'] = emotibit_df['LocalTimestamp'] + offset
-    
-    # For each event marker, find the closest biometric timestamp
-    for idx, event_row in event_markers_df.iterrows():
-        event_time = event_row['unix_timestamp']
-        event_marker = event_row['event_marker']
-        condition = event_row.get('condition', 'N/A')
-        
-        # Find closest timestamp in emotibit data
-        time_diffs = (emotibit_df['AdjustedTimestamp'] - event_time).abs()
-        closest_idx = time_diffs.idxmin()
-        closest_time_diff = time_diffs.min()
-        
-        if closest_time_diff <= tolerance:
-            closest_row = emotibit_df.loc[closest_idx]
-            matches.append({
-                'event_marker': event_marker,
-                'condition': condition,
-                'event_timestamp': event_time,
-                'event_iso': event_row.get('iso_timestamp', 'N/A'),
-                'matched_timestamp': closest_row['LocalTimestamp'],
-                'adjusted_timestamp': closest_row['AdjustedTimestamp'],
-                'time_diff': closest_time_diff,
-                'biometric_value': closest_row.iloc[-1],  # Last column is the metric value
-                'row_index': closest_idx
-            })
-        else:
-            print(f"WARNING: No match within tolerance for event '{event_marker}' at {event_time}")
-    
-    return matches
 
 @app.route('/api/test-timestamp-matching', methods=['POST'])
 def test_timestamp_matching():
