@@ -1,3 +1,63 @@
+/**
+ * AnalysisViewer Component
+ * 
+ * This React component provides a user interface for uploading and analyzing experiment data from a subject folder.
+ * It supports selecting biometric metrics, configuring analysis comparison groups, and running analysis via backend API endpoints.
+ * 
+ * @component
+ * 
+ * @example
+ * <AnalysisViewer />
+ * 
+ * @returns {JSX.Element} The rendered AnalysisViewer UI.
+ * 
+ * @description
+ * - Allows users to select a subject folder containing experiment data files.
+ * - Scans the folder for required files (EmotiBit data, respiration data, event markers, SER/transcription).
+ * - Displays detected files and available biometric metrics.
+ * - Enables selection/deselection of metrics and configuration of comparison groups for analysis.
+ * - Supports custom time window configuration for each comparison group.
+ * - Handles uploading selected files and analysis configuration to the backend for processing.
+ * - Displays status messages and redirects to results upon successful analysis.
+ * 
+ * @state
+ * @property {string|null} selectedFolder - Name of the selected folder.
+ * @property {Object|null} fileStructure - Structure containing detected files and their metadata.
+ * @property {string[]} availableMetrics - List of available biometric metrics detected in the folder.
+ * @property {string[]} availableEventMarkers - List of available event markers.
+ * @property {string[]} availableConditions - List of available condition markers.
+ * @property {Object} selectedMetrics - Object mapping metric names to boolean selection state.
+ * @property {string} uploadStatus - Status message for upload and analysis operations.
+ * @property {boolean} isScanning - Indicates if folder scanning is in progress.
+ * @property {boolean} isAnalyzing - Indicates if analysis is in progress.
+ * @property {Object|null} results - Analysis results returned from the backend.
+ * @property {Array<Object>} comparisonGroups - Array of analysis comparison group configurations.
+ * @property {number} nextGroupId - Next available ID for a new comparison group.
+ * 
+ * @functions
+ * @function addComparisonGroup - Adds a new comparison group to the configuration.
+ * @function removeComparisonGroup - Removes a comparison group by ID.
+ * @function updateComparisonGroup - Updates a field in a comparison group.
+ * @function handleFolderSelect - Handles folder selection and scans for required files.
+ * @function scanFolderData - Sends folder data to backend to detect metrics, event markers, and conditions.
+ * @function handleMetricToggle - Toggles selection state for a biometric metric.
+ * @function handleSelectAll - Selects all available metrics.
+ * @function handleDeselectAll - Deselects all metrics.
+ * @function uploadAndAnalyze - Uploads selected files and configuration to backend and runs analysis.
+ * @function getSelectedCount - Returns the count of selected metrics.
+ * 
+ * @api
+ * - POST /api/scan-folder-data: Scans folder for metrics, event markers, and conditions.
+ * - POST /api/upload-folder-and-analyze: Uploads files and configuration, runs analysis.
+ * 
+ * @css
+ * - Uses styles from 'AnalysisViewer.css'.
+ * 
+ * @see
+ * - Backend API endpoints for scanning and analysis.
+ * - Results page at '/results' for viewing analysis output.
+ */
+
 import React, { useState } from 'react';
 import './AnalysisViewer.css';
 

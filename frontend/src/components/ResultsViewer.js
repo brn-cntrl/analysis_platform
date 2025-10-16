@@ -1,3 +1,28 @@
+/**
+ * ResultsViewer component displays the results of an analysis, including metrics, visualizations, and event markers.
+ * 
+ * Features:
+ * - Loads analysis results from sessionStorage on mount.
+ * - Displays analysis metrics, plots, and event markers summary.
+ * - Allows users to save all figures (plots) as image files.
+ * - Allows users to export the full results as a JSON file.
+ * - Handles loading state and error cases for saving figures.
+ * 
+ * State:
+ * @typedef {Object} Results
+ * @property {Object} analysis - Analysis metrics grouped by metric and group.
+ * @property {Array<Object>} plots - Array of plot objects with { name, url, filename }.
+ * @property {Object} markers - Event markers summary with shape and conditions.
+ * @property {string|number} timestamp - Timestamp of analysis generation.
+ * 
+ * @component
+ * @returns {JSX.Element} The rendered ResultsViewer component.
+ * 
+ * @example
+ * // Usage in a parent component
+ * <ResultsViewer />
+ */
+
 import React, { useEffect, useState } from 'react';
 import './ResultsViewer.css';
 
