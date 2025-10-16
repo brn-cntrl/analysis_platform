@@ -436,7 +436,6 @@
   color: #333;
 }
 
-/* Analysis Configuration Section */
 .analysis-config-section {
   background-color: #f0f8ff;
   border: 2px solid #4a90e2;
@@ -653,7 +652,6 @@
   box-shadow: 0 4px 8px rgba(33, 150, 243, 0.3);
 }
 
-/* Dynamic Comparison Groups */
 .comparison-groups-container {
   display: flex;
   flex-direction: column;
@@ -742,7 +740,6 @@
   box-shadow: 0 4px 8px rgba(76, 175, 80, 0.3);
 }
 
-/* Two Column Layout */
 .two-column-layout {
   display: grid;
   grid-template-columns: 400px 1fr;
@@ -766,7 +763,6 @@
   gap: 20px;
 }
 
-/* Left Column Sections */
 .left-column .file-structure,
 .left-column .event-markers-section,
 .left-column .conditions-section-display {
@@ -803,7 +799,6 @@
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-/* Right Column - Analysis Config */
 .right-column .analysis-config-section {
   background-color: white;
   border-radius: 8px;
@@ -811,7 +806,6 @@
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-/* Right Column - Button and Messages */
 .right-column .analyze-button {
   width: 100%;
 }
@@ -821,7 +815,6 @@
   width: 100%;
 }
 
-/* Remove old grid styling from event markers */
 .event-markers-grid,
 .conditions-grid {
   display: flex;
@@ -829,7 +822,6 @@
   gap: 8px;
 }
 
-/* Responsive - stack on smaller screens */
 @media (max-width: 1200px) {
   .two-column-layout {
     grid-template-columns: 1fr;

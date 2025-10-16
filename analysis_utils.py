@@ -20,20 +20,16 @@ def prepare_event_markers_timestamps(event_markers_df):
     """
     df = event_markers_df.copy()
     
-    # Check if unix_timestamp already exists
     if 'unix_timestamp' in df.columns:
         print("  ✓ Found 'unix_timestamp' column")
         return df
     
-    # Check for 'timestamp' column (backward compatibility)
     if 'timestamp' in df.columns:
         print("  ✓ Found 'timestamp' column (ISO format) - converting to unix_timestamp")
         
-        # Convert ISO format timestamps to Unix timestamps
         dt_series = pd.to_datetime(df['timestamp'], errors='coerce')
         df['unix_timestamp'] = (dt_series - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s')
         
-        # Drop NaN values
         before = len(df)
         df = df.dropna(subset=['unix_timestamp'])
         after = len(df)
@@ -45,7 +41,6 @@ def prepare_event_markers_timestamps(event_markers_df):
         
         return df
     
-    # Neither column found
     raise ValueError("Event markers file must have either 'unix_timestamp' or 'timestamp' column")
 
 
@@ -87,17 +82,14 @@ def match_event_markers_to_biometric(event_markers_df, emotibit_df, offset, tole
     """
     matches = []
     
-    # Apply offset to emotibit timestamps
     emotibit_df = emotibit_df.copy()
     emotibit_df['AdjustedTimestamp'] = emotibit_df['LocalTimestamp'] + offset
     
-    # For each event marker, find the closest biometric timestamp
     for idx, event_row in event_markers_df.iterrows():
         event_time = event_row['unix_timestamp']
         event_marker = event_row['event_marker']
         condition = event_row.get('condition', 'N/A')
         
-        # Find closest timestamp in emotibit data
         time_diffs = (emotibit_df['AdjustedTimestamp'] - event_time).abs()
         closest_idx = time_diffs.idxmin()
         closest_time_diff = time_diffs.min()
@@ -134,18 +126,14 @@ def extract_window_data(emotibit_df, event_markers_df, offset, window_config):
     Returns:
         DataFrame with data from the specified window
     """
-    # Apply offset to emotibit timestamps
     emotibit_df = emotibit_df.copy()
     emotibit_df['AdjustedTimestamp'] = emotibit_df['LocalTimestamp'] + offset
     
-    # Get the metric column name (last column)
     metric_col = emotibit_df.columns[-1]
     
-    # Find all occurrences of the event marker
     event_marker = window_config['eventMarker']
     marker_rows = event_markers_df[event_markers_df['event_marker'] == event_marker]
     
-    # Filter by condition marker if specified
     condition_marker = window_config.get('conditionMarker', '')
     if condition_marker and condition_marker != '':
         if 'condition' in event_markers_df.columns:
@@ -161,14 +149,12 @@ def extract_window_data(emotibit_df, event_markers_df, offset, window_config):
     print(f"  Found {len(marker_rows)} occurrences of '{event_marker}'" +
           (f" with condition '{condition_marker}'" if condition_marker else ""))
     
-    # Extract data for each occurrence
     all_data = []
     
     for idx, marker_row in marker_rows.iterrows():
         marker_time = marker_row['unix_timestamp']
         
         if window_config['timeWindowType'] == 'full':
-            # Full event duration - find next event marker or end of data
             next_markers = event_markers_df[
                 (event_markers_df['unix_timestamp'] > marker_time) &
                 (event_markers_df['event_marker'].notna()) &
@@ -197,7 +183,6 @@ def extract_window_data(emotibit_df, event_markers_df, offset, window_config):
         if len(window_data) > 0:
             all_data.append(window_data)
     
-    # Concatenate all windows
     if len(all_data) == 0:
         return pd.DataFrame()
     

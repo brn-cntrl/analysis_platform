@@ -197,13 +197,11 @@ function AnalysisViewer() {
       return;
     }
 
-    // Validate that at least 2 groups are configured
     if (comparisonGroups.length < 1) {
       setUploadStatus('Please add at least 1 comparison group');
       return;
     }
 
-    // Validate that all groups have event markers selected
     const missingMarkers = comparisonGroups.filter(g => !g.eventMarker);
     if (missingMarkers.length > 0) {
       setUploadStatus('Please select event markers for all comparison groups');
@@ -257,11 +255,9 @@ function AnalysisViewer() {
         body: formData,
       });
 
-      // Get the raw response text first
       const responseText = await response.text();
       console.log('Raw response:', responseText);
       
-      // Try to parse it as JSON
       let data;
       try {
         data = JSON.parse(responseText);

@@ -24,20 +24,16 @@ function ResultsViewer() {
     setIsSavingFigures(true);
 
     try {
-      // Download each figure individually
       for (let i = 0; i < results.plots.length; i++) {
         const plot = results.plots[i];
         
-        // Small delay between downloads to prevent browser from blocking
         if (i > 0) {
-          await new Promise(resolve => setTimeout(resolve, 300));
+          await new Promise(resolve => setTimeout(resolve, 300)); // prevent blocking
         }
 
         try {
           const response = await fetch(plot.url);
           const blob = await response.blob();
-          
-          // Create download link
           const url = URL.createObjectURL(blob);
           const link = document.createElement('a');
           link.href = url;
