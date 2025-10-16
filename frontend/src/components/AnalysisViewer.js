@@ -198,8 +198,8 @@ function AnalysisViewer() {
     }
 
     // Validate that at least 2 groups are configured
-    if (comparisonGroups.length < 2) {
-      setUploadStatus('Please add at least 2 comparison groups');
+    if (comparisonGroups.length < 1) {
+      setUploadStatus('Please add at least 1 comparison group');
       return;
     }
 
