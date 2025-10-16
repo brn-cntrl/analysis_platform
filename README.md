@@ -1,4 +1,4 @@
-# EmotiBit Data Analysis Platform
+# Data Analysis Platform Quickstart
 
 A web-based platform for analyzing EmotiBit biometric data with interactive visualizations. Upload CSV files, execute Jupyter notebook analysis server-side, and view results with matplotlib plots directly in your browser.
 
