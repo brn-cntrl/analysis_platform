@@ -76,6 +76,7 @@ function AnalysisViewer() {
   // const [testResults, setTestResults] = useState(null);
 
   // Analysis Configuration State
+  const [analyzeHRV, setAnalyzeHRV] = useState(false);
   const [comparisonGroups, setComparisonGroups] = useState([
     {
       id: 1,
@@ -165,6 +166,13 @@ function AnalysisViewer() {
           path: path,
           file: file
         };
+      }
+
+      console.log('Checking file:', fileName);
+      if (fileName.includes('_pi.csv')) {
+        console.log('Found PPG file!');
+        structure.hasPPGFiles = true;
+        console.log('hasPPGFiles:', structure.hasPPGFiles);
       }
     });
 
@@ -269,7 +277,7 @@ function AnalysisViewer() {
     }
 
     const selectedMetricsList = Object.keys(selectedMetrics).filter(m => selectedMetrics[m]);
-    if (selectedMetricsList.length === 0) {
+    if (selectedMetricsList.length === 0 && !analyzeHRV) {
       setUploadStatus('Please select at least one biometric metric');
       return;
     }
@@ -293,7 +301,19 @@ function AnalysisViewer() {
         pathsToUpload.push(metricFile.path);
       }
     });
-    
+
+    if (analyzeHRV) {
+      ['PI', 'PR', 'PG'].forEach(ppgType => {
+        const ppgFile = fileStructure.emotibitFiles.find(f => 
+          f.name.includes(`_${ppgType}.csv`)
+        );
+        if (ppgFile) {
+          filesToUpload.push(ppgFile.file);
+          pathsToUpload.push(ppgFile.path);
+        }
+      });
+    }
+
     console.log(`Uploading ${filesToUpload.length} files for analysis:`, pathsToUpload.map(p => p.split('/').pop()));
     
     filesToUpload.forEach((file, index) => {
@@ -304,6 +324,7 @@ function AnalysisViewer() {
     formData.append('folder_name', selectedFolder);
     formData.append('selected_metrics', JSON.stringify(selectedMetricsList));
     formData.append('comparison_groups', JSON.stringify(comparisonGroups));
+    formData.append('analyze_hrv', JSON.stringify(analyzeHRV));
 
     try {
       setIsAnalyzing(true);
@@ -500,6 +521,9 @@ function AnalysisViewer() {
           <div className="right-column">
             
             {/* Metrics Selection */}
+            {console.log('availableMetrics.length:', availableMetrics.length)}
+            {console.log('Inside metrics-grid, hasPPGFiles:', fileStructure.hasPPGFiles)}
+            {console.log('fileStructure.hasPPGFiles:', fileStructure?.hasPPGFiles)}
             {availableMetrics.length > 0 && (
               <div className="metrics-section">
                 <div className="metrics-header">
@@ -518,6 +542,19 @@ function AnalysisViewer() {
                 </div>
                 
                 <div className="metrics-grid">
+                  {fileStructure.hasPPGFiles && (
+                    <>
+                      {console.log('RENDERING HRV CHECKBOX NOW')}
+                      <label className="metric-checkbox" >
+                        <input
+                          type="checkbox"
+                          checked={analyzeHRV}
+                          onChange={(e) => setAnalyzeHRV(e.target.checked)}
+                        />
+                        <span className="metric-label">HRV</span>
+                      </label>
+                    </>
+                  )}
                   {availableMetrics.map(metric => (
                     <label key={metric} className="metric-checkbox">
                       <input
@@ -531,6 +568,7 @@ function AnalysisViewer() {
                 </div>
               </div>
             )}
+            
 
             {/* Analysis Configuration */}
             {availableEventMarkers.length > 0 && (

@@ -166,3 +166,46 @@
 .metric-analysis:last-child {
   border-bottom: none;
 }
+
+.hrv-card {
+  background-color: #f8f9fa;
+}
+
+.hrv-summary {
+  margin-bottom: 2rem;
+}
+
+.hrv-indices {
+  margin-bottom: 2rem;
+  background: white;
+  padding: 1.5rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.indices-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.index-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 1rem;
+  background: #f8f9fa;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9rem;
+}
+
+.index-name {
+  font-weight: 600;
+  color: #495057;
+}
+
+.index-value {
+  color: #e91e63;
+  font-weight: bold;
+}

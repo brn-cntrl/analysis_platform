@@ -2,7 +2,6 @@ from flask import Flask, jsonify, request, send_from_directory, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import os
-import subprocess
 import json
 import shutil
 import re
@@ -16,6 +15,7 @@ from analysis_utils import (
     find_timestamp_offset,
     match_event_markers_to_biometric
 )
+from analysis_runner import run_analysis
 
 app = Flask(__name__, static_folder='frontend/build', static_url_path='')
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max
@@ -23,7 +23,6 @@ CORS(app)
 
 UPLOAD_FOLDER = 'data'
 OUTPUT_FOLDER = 'data/outputs'
-NOTEBOOK_PATH = 'data_analysis.ipynb'
 ALLOWED_EXTENSIONS = {'csv'}
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -35,24 +34,22 @@ app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# @app.route('/api/hello', methods=['GET'])
-# def hello():
-#     return jsonify({'message': 'Hello from Flask!'})
 
 @app.route('/api/upload-folder-and-analyze', methods=['POST'])
 def upload_folder_and_analyze():
     """
     Handles the upload of multiple files and folders, organizes them into a structured directory,
-    generates a manifest of uploaded files, and triggers analysis by executing a Jupyter notebook.
+    generates a manifest of uploaded files, and triggers analysis by calling the analysis_runner module.
+    
     Workflow:
     - Validates the presence of uploaded files in the request.
     - Extracts file objects, their relative paths, folder name, selected metrics, and comparison groups from the request.
     - Organizes files into a subject-specific folder, preserving their relative paths.
     - Categorizes files into emotibit data, respiration data, event markers, SER/transcription files, and others.
     - Generates a manifest JSON file describing the uploaded files and analysis configuration.
-    - Copies key files (emotibit and event markers) to standard locations for analysis.
-    - Executes a Jupyter notebook for analysis, capturing output and errors.
+    - Runs analysis directly via analysis_runner.run_analysis() instead of notebook subprocess.
     - Returns analysis results and manifest as a JSON response, or appropriate error messages.
+    
     Returns:
         Response: JSON response containing analysis results, manifest, and status message,
                   or error details with appropriate HTTP status code.
@@ -67,6 +64,7 @@ def upload_folder_and_analyze():
 
     selected_metrics = json.loads(request.form.get('selected_metrics', '[]'))
     comparison_groups = json.loads(request.form.get('comparison_groups', '[]'))
+    analyze_hrv = json.loads(request.form.get('analyze_hrv', 'false')) 
     
     print(f"Analysis Configuration:")
     print(f"  Selected Metrics: {selected_metrics}")
@@ -143,77 +141,56 @@ def upload_folder_and_analyze():
         
         print(f"Files organized in: {subject_folder}")
         print(f"Event markers file: {file_manifest['event_markers']}")
-        
-        if file_manifest['emotibit_files']:
-            ground_truth_path = os.path.join(app.config['UPLOAD_FOLDER'], 'ground_truth.csv')
-            shutil.copy(file_manifest['emotibit_files'][0]['path'], ground_truth_path)
-        
-        if file_manifest['event_markers']:
-            markers_path = os.path.join(app.config['UPLOAD_FOLDER'], 'markers.csv')
-            shutil.copy(file_manifest['event_markers']['path'], markers_path)
-        else:
-            print("WARNING: No event markers file found!")
-        
-        print("Executing notebook...")
-        result = subprocess.run(
-            [
-                'jupyter', 'nbconvert',
-                '--to', 'notebook',
-                '--execute',
-                '--inplace',
-                NOTEBOOK_PATH
-            ],
-            capture_output=True,
-            text=True,
-            timeout=120
+        print("Running analysis...")
+
+        results = run_analysis(
+            subject_folder=subject_folder,
+            manifest=file_manifest,
+            selected_metrics=selected_metrics,
+            comparison_groups=comparison_groups,
+            analyze_hrv=analyze_hrv,
+            output_folder=OUTPUT_FOLDER
         )
         
-        if result.returncode != 0:
-            error_msg = f"Notebook execution failed: {result.stderr}"
-            print(error_msg)
-            return jsonify({'error': error_msg}), 500
+        print("Analysis completed successfully")
         
-        print("Notebook executed successfully")
+        for plot in results.get('plots', []):
+            plot['url'] = f"/api/plot/{plot['filename']}"
         
+        results['file_manifest'] = file_manifest
+        
+        # Save results to JSON file (optional, for backward compatibility)
         results_path = os.path.join(OUTPUT_FOLDER, 'results.json')
-        if os.path.exists(results_path):
-            with open(results_path, 'r') as f:
-                results = json.load(f)
-            
-            for plot in results.get('plots', []):
-                plot['url'] = f"/api/plot/{plot['filename']}"
-            
-            results['file_manifest'] = file_manifest
-            
-            return jsonify({
-                'message': 'Analysis completed successfully',
-                'results': results,
-                'folder_name': folder_name
-            }), 200
-        else:
-            return jsonify({'error': 'Results file not found'}), 500
+        with open(results_path, 'w') as f:
+            json.dump(results, f, indent=2)
         
-    except subprocess.TimeoutExpired:
-        return jsonify({'error': 'Notebook execution timed out'}), 500
+        return jsonify({
+            'message': 'Analysis completed successfully',
+            'results': results,
+            'folder_name': folder_name
+        }), 200
+        
     except Exception as e:
         error_msg = f"Error: {str(e)}"
         print(error_msg)
         import traceback
         traceback.print_exc()
         return jsonify({'error': error_msg}), 500
-    
+
+
 @app.route('/api/plot/<filename>', methods=['GET'])
 def serve_plot(filename):
     """
     Serves a plot image file from the output folder.
+    
     Args:
         filename (str): The name of the plot image file to serve.
+        
     Returns:
         Response: If the file exists, returns the image file with 'image/png' MIME type.
                   If the file does not exist, returns a JSON error message with a 404 status code.
                   If an exception occurs, returns a JSON error message with a 500 status code.
     """
-
     try:
         file_path = os.path.join(OUTPUT_FOLDER, filename)
         if os.path.exists(file_path):
@@ -223,6 +200,7 @@ def serve_plot(filename):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
 @app.route('/api/results', methods=['GET'])
 def get_results():
     """
@@ -230,10 +208,10 @@ def get_results():
     If the results file exists, the function loads its contents, updates plot URLs for API access,
     and returns the results with a 200 status code. If the file does not exist, returns a 404 error.
     Handles unexpected errors by returning a 500 error with the exception message.
+    
     Returns:
         Response: Flask JSON response containing results data or error message.
     """
-    
     try:
         results_path = os.path.join(OUTPUT_FOLDER, 'results.json')
         if os.path.exists(results_path):
@@ -249,16 +227,20 @@ def get_results():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
 @app.route('/api/save_images', methods=['POST'])
 def save_images():
     """
     Saves PNG images from the output folder to a specified target folder.
-    This route expects a JSON payload containing a 'folder_name' key. It creates a target folder under 'data/' using the provided folder name (sanitized for security), and copies all PNG images from the OUTPUT_FOLDER to the target folder. If the folder does not exist, it will be created.
+    
+    This route expects a JSON payload containing a 'folder_name' key. It creates a target folder 
+    under 'data/' using the provided folder name (sanitized for security), and copies all PNG 
+    images from the OUTPUT_FOLDER to the target folder. If the folder does not exist, it will be created.
+    
     Returns:
         JSON response with a success message and HTTP 200 status code if images are saved successfully.
         JSON response with an error message and HTTP 500 status code if an exception occurs.
     """
-    
     try:
         data = request.get_json()
         folder_name = data.get('folder_name', 'default_folder')
@@ -275,16 +257,21 @@ def save_images():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
 @app.route('/api/scan-folder-data', methods=['POST'])
 def scan_folder_data():
     """
-    Scans provided EmotiBit filenames and an optional event markers file to extract available metrics, event markers, and conditions.
+    Scans provided EmotiBit filenames and an optional event markers file to extract available 
+    metrics, event markers, and conditions.
+    
     This route expects a POST request with the following form data:
         - 'emotibit_filenames': A JSON-encoded list of EmotiBit CSV filenames.
         - 'event_markers_file' (optional): A CSV file containing event markers and conditions.
+    
     The function performs the following:
         - Parses the filenames to extract unique metric tags, excluding 'timesyncs' and 'timesyncmap'.
-        - If an event markers file is provided, reads the CSV to extract unique event markers (with normalization for PRS markers) and conditions.
+        - If an event markers file is provided, reads the CSV to extract unique event markers 
+          (with normalization for PRS markers) and conditions.
         - Returns a JSON response containing:
             - 'metrics': List of unique metric tags found.
             - 'metrics_count': Number of metrics.
@@ -292,10 +279,11 @@ def scan_folder_data():
             - 'event_markers_count': Number of event markers.
             - 'conditions': List of unique conditions found.
             - 'conditions_count': Number of conditions.
-    Returns:
-        Response: JSON object with extracted metrics, event markers, and conditions, or an error message with appropriate HTTP status code.
-    """
     
+    Returns:
+        Response: JSON object with extracted metrics, event markers, and conditions, 
+                  or an error message with appropriate HTTP status code.
+    """
     try:
         emotibit_filenames_json = request.form.get('emotibit_filenames')
         if not emotibit_filenames_json:
@@ -389,13 +377,14 @@ def scan_folder_data():
         traceback.print_exc()
         return jsonify({'error': error_msg}), 500
 
+
 @app.route('/api/test-timestamp-matching', methods=['POST'])
 def test_timestamp_matching():
     """
-        NOTE:
-            This is a test route to verify timestamp offset correction and matching.
-            This endpoint is only for testing. It is replicated in the notebook analysis
-            but leave this here for easy debugging.
+    NOTE:
+        This is a test route to verify timestamp offset correction and matching.
+        This endpoint is only for testing. It is replicated in the notebook analysis
+        but leave this here for easy debugging.
     """
     try:
         files = request.files.getlist('files')
@@ -532,14 +521,17 @@ def test_timestamp_matching():
         if os.path.exists(test_folder):
             shutil.rmtree(test_folder)
         return jsonify({'error': error_msg}), 500
-    
+
+
 @app.route('/')
 def serve():
     return send_from_directory(app.static_folder, 'index.html')
 
+
 @app.errorhandler(404)
 def not_found(e):
     return send_from_directory(app.static_folder, 'index.html')
+
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)

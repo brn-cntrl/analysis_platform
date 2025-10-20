@@ -125,7 +125,57 @@ function ResultsViewer() {
       </div>
 
       <div className="results-container">
-        
+        {/* HRV Analysis Results */}
+        {results.hrv && (
+          <div className="result-card hrv-card">
+            <h2 className="card-title">HRV Analysis</h2>
+            
+            <div className="hrv-summary">
+              <h3 className="section-title">Summary Statistics</h3>
+              <div className="stats-grid">
+                <div className="stat-card">
+                  <div className="stat-label">Peaks Detected</div>
+                  <div className="stat-value">{results.hrv.num_peaks}</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-label">Duration</div>
+                  <div className="stat-value">{results.hrv.duration_minutes.toFixed(2)}</div>
+                  <div className="stat-detail">minutes</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-label">Average HR</div>
+                  <div className="stat-value">{results.hrv.average_hr_bpm.toFixed(2)}</div>
+                  <div className="stat-detail">bpm</div>
+                </div>
+              </div>
+            </div>
+
+            {results.hrv.indices && Object.keys(results.hrv.indices).length > 0 && (
+              <div className="hrv-indices">
+                <h3 className="section-title">HRV Indices</h3>
+                <div className="indices-grid">
+                  {Object.entries(results.hrv.indices).map(([key, value]) => (
+                    <div key={key} className="index-item">
+                      <span className="index-name">{key}:</span>
+                      <span className="index-value">
+                        {value !== null && value !== undefined 
+                          ? typeof value === 'number' ? value.toFixed(4) : value
+                          : 'N/A'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {results.plots?.filter(p => p.filename.startsWith('HRV_')).map((plot, idx) => (
+              <div key={idx} className="plot-container">
+                <h4 className="plot-title">{plot.name}</h4>
+                <img src={plot.url} alt={plot.name} className="plot-image" />
+              </div>
+            ))}
+          </div>
+        )}
         {/* Analysis Results */}
         {results.analysis && Object.keys(results.analysis).length > 0 && (
         <div className="result-card">
@@ -153,10 +203,10 @@ function ResultsViewer() {
         )}
 
         {/* Visualizations */}
-        {results.plots && results.plots.length > 0 && (
+        {results.plots?.filter(p => !p.filename.startsWith('HRV_')).length > 0 && (
           <div className="result-card">
             <h2 className="card-title">Visualizations</h2>
-            {results.plots.map((plot, idx) => (
+            {results.plots.filter(p => !p.filename.startsWith('HRV_')).map((plot, idx) => (
               <div key={idx} className="plot-container">
                 <h3 className="plot-title">{plot.name}</h3>
                 <img 
