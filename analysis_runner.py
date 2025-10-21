@@ -449,23 +449,16 @@ def analyze_hrv_from_ppg(manifest, df_markers, comparison_groups, output_folder)
     print("  Loading PPG data files...")
     
     # Find PI file (required)
-    print("  Loading PPG data files...")
-    print(f"  Total emotibit files in manifest: {len(manifest['emotibit_files'])}")
-    for f in manifest['emotibit_files']:
-        print(f"    - {f['filename']}")
-
-    # Find PI file (required)
     pi_file = None
     for emotibit_file in manifest['emotibit_files']:
-        print(f"  Checking file: {emotibit_file['filename']}")
         if '_PI.csv' in emotibit_file['filename']:
             pi_file = emotibit_file['path']
-            print(f"  ✓ Found PI file: {emotibit_file['filename']}")
             break
-
+    
     if not pi_file:
-        print("  ERROR: No PI file found in manifest")
         raise FileNotFoundError("PI (Infrared) PPG file not found")
+    
+    print(f"    ✓ Found PI file")
     
     # Load and process
     pi_data = pd.read_csv(pi_file)
@@ -514,39 +507,100 @@ def analyze_hrv_from_ppg(manifest, df_markers, comparison_groups, output_folder)
 
 
 def generate_hrv_plot(data, param, plot_type, output_folder):
-    """Generate HRV plots."""
+    """Generate HRV plots with proper spacing to prevent overlapping."""
     try:
         if plot_type == 'signal':
             signals, info = data, param
+            # Let NeuroKit2 create its own figure
             nk.ppg_plot(signals, info)
-            plt.suptitle('PPG Signal Analysis', fontsize=14, fontweight='bold')
+            # NOW get the figure it created and resize it
+            fig = plt.gcf()
+            fig.set_size_inches(20, 22)  # Make it much taller
+            fig.suptitle('PPG Signal with Detected Peaks', fontsize=24, fontweight='bold', y=0.995)
+            # Increase tick label font sizes for all axes
+            for ax in fig.get_axes():
+                ax.tick_params(axis='both', which='major', labelsize=12)
+                ax.xaxis.label.set_fontsize(16)
+                ax.yaxis.label.set_fontsize(16)
+                legend = ax.get_legend()
+                if legend:
+                    for text in legend.get_texts():
+                        text.set_fontsize(16)
+
             filename = 'HRV_ppg_signal.png'
             name = 'HRV - PPG Signal with Peaks'
+            
         elif plot_type == 'time':
             peaks, sampling_rate = data, param
+            # Let NeuroKit2 create the plot, then get and resize
             nk.hrv_time(peaks, sampling_rate=sampling_rate, show=True)
-            plt.suptitle('Time Domain HRV', fontsize=14, fontweight='bold')
+            fig = plt.gcf()
+            fig.set_size_inches(20, 20)
+            fig.suptitle('Time Domain HRV', fontsize=24, fontweight='bold', y=0.995)
+            
+            # Increase tick label font sizes
+            for ax in fig.get_axes():
+                ax.tick_params(axis='both', which='major', labelsize=18)
+                ax.xaxis.label.set_fontsize(16)
+                ax.yaxis.label.set_fontsize(16)
+                legend = ax.get_legend()
+                if legend:
+                    for text in legend.get_texts():
+                        text.set_fontsize(16)
+
             filename = 'HRV_time_domain.png'
             name = 'HRV - Time Domain'
+            
         elif plot_type == 'frequency':
             peaks, sampling_rate = data, param
+            # Let NeuroKit2 create the plot, then get and resize
             nk.hrv_frequency(peaks, sampling_rate=sampling_rate, show=True)
-            plt.suptitle('Frequency Domain HRV', fontsize=14, fontweight='bold')
+            fig = plt.gcf()
+            fig.set_size_inches(20, 18)
+            fig.suptitle('Frequency Domain HRV', fontsize=24, fontweight='bold', y=0.995)
+            
+            # Increase tick label font sizes
+            for ax in fig.get_axes():
+                ax.tick_params(axis='both', which='major', labelsize=18)
+                ax.xaxis.label.set_fontsize(16)
+                ax.yaxis.label.set_fontsize(16)
+                legend = ax.get_legend()
+                if legend:
+                    for text in legend.get_texts():
+                        text.set_fontsize(16)
+
             filename = 'HRV_frequency_domain.png'
             name = 'HRV - Frequency Domain'
+            
         elif plot_type == 'nonlinear':
             peaks, sampling_rate = data, param
+            # Let NeuroKit2 create the plot, then get and resize
             nk.hrv_nonlinear(peaks, sampling_rate=sampling_rate, show=True)
-            plt.suptitle('Non-linear HRV', fontsize=14, fontweight='bold')
+            fig = plt.gcf()
+            fig.set_size_inches(22, 20)
+            fig.suptitle('Non-linear HRV', fontsize=24, fontweight='bold', y=0.995)
+            
+            # Increase tick label font sizes
+            for ax in fig.get_axes():
+                ax.tick_params(axis='both', which='major', labelsize=18)
+                ax.xaxis.label.set_fontsize(16)
+                ax.yaxis.label.set_fontsize(16)
+                legend = ax.get_legend()
+                if legend:
+                    for text in legend.get_texts():
+                        text.set_fontsize(16)
+
             filename = 'HRV_nonlinear.png'
             name = 'HRV - Non-linear'
         
+        # Save the properly-sized figure
         plot_path = os.path.join(output_folder, filename)
-        plt.savefig(plot_path, dpi=100, bbox_inches='tight')
-        plt.close()
+        plt.savefig(plot_path, dpi=100, bbox_inches='tight', pad_inches=0.5)
+        plt.close(fig)
         
         print(f"    ✓ Saved: {filename}")
         return {'name': name, 'path': plot_path, 'filename': filename, 'url': f'/api/plot/{filename}'}
     except Exception as e:
         print(f"    ⚠ Could not generate {plot_type} plot: {e}")
+        plt.close('all')
         return None
