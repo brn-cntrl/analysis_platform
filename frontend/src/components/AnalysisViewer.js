@@ -72,6 +72,7 @@ function AnalysisViewer() {
   const [isScanning, setIsScanning] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [results, setResults] = useState(null);
+  const [selectedPlotTypes, setSelectedPlotTypes] = useState({});
   // const [isTesting, setIsTesting] = useState(false);
   // const [testResults, setTestResults] = useState(null);
 
@@ -376,6 +377,24 @@ function AnalysisViewer() {
     return Object.values(selectedMetrics).filter(val => val).length;
   };
 
+  const plotTypes = [
+    { id: 'timeseries', label: 'Time Series' },
+    { id: 'boxplot', label: 'Box Plot' },
+    { id: 'violin', label: 'Violin Plot' },
+    { id: 'histogram', label: 'Histogram' },
+    { id: 'poincare', label: 'Poincaré Plot' },
+    { id: 'psd', label: 'Power Spectral Density' },
+    { id: 'scatter', label: 'Scatter Plot' },
+    { id: 'heatmap', label: 'Heatmap' },
+    { id: 'barchart', label: 'Bar Chart' },
+    { id: 'errorbar', label: 'Error Bar Plot' },
+    { id: 'correlation', label: 'Correlation Matrix' },
+    { id: 'kde', label: 'Distribution (KDE)' },
+    { id: 'areaplot', label: 'Area Plot' },
+    { id: 'radar', label: 'Radar Chart' },
+    { id: 'qqplot', label: 'Q-Q Plot' }
+  ];
+
   // const testTimestampMatching = async () => {
   //   const selectedMetricsList = Object.keys(selectedMetrics).filter(m => selectedMetrics[m]);
     
@@ -568,8 +587,39 @@ function AnalysisViewer() {
                 </div>
               </div>
             )}
-            
 
+            {/* Plot Types Selection */}
+            {availableMetrics.length > 0 && (
+              <div className="metrics-section">
+                <div className="metrics-header">
+                  <h3 className="structure-title">Select Plot Types</h3>
+                  <div className="metrics-controls">
+                    <span className="selected-count">
+                      Choose visualization methods for your analysis
+                    </span>
+                  </div>
+                </div>
+                
+                <div className="metrics-grid">
+                  {plotTypes.map(plotType => (
+                    <label key={plotType.id} className="metric-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={selectedPlotTypes[plotType.id] || false}
+                        onChange={() => {
+                          setSelectedPlotTypes(prev => ({
+                            ...prev,
+                            [plotType.id]: !prev[plotType.id]
+                          }));
+                        }}
+                      />
+                      <span className="metric-label">{plotType.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+            
             {/* Analysis Configuration */}
             {availableEventMarkers.length > 0 && (
               <div className="analysis-config-section">
