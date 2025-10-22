@@ -72,7 +72,6 @@ function AnalysisViewer() {
   const [isScanning, setIsScanning] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [results, setResults] = useState(null);
-  const [selectedPlotTypes, setSelectedPlotTypes] = useState({});
   // const [isTesting, setIsTesting] = useState(false);
   // const [testResults, setTestResults] = useState(null);
 
@@ -84,6 +83,8 @@ function AnalysisViewer() {
       label: 'Group 1',
       eventMarker: '',
       conditionMarker: '',
+      plotType: 'line',         
+      analysisMethod: 'raw',    
       timeWindowType: 'full',
       customStart: -5,
       customEnd: 30
@@ -97,6 +98,8 @@ function AnalysisViewer() {
       label: `Group ${nextGroupId}`,
       eventMarker: '',
       conditionMarker: '',
+      plotType: 'line',
+      analysisMethod: 'raw',
       timeWindowType: 'full',
       customStart: -5,
       customEnd: 30
@@ -107,7 +110,7 @@ function AnalysisViewer() {
 
   const removeComparisonGroup = (id) => {
     if (comparisonGroups.length <= 1) {
-      alert('You must have at least one comparison group');
+      alert('You must have at least one Analysis Window');
       return;
     }
     setComparisonGroups(comparisonGroups.filter(group => group.id !== id));
@@ -267,13 +270,13 @@ function AnalysisViewer() {
     }
 
     if (comparisonGroups.length < 1) {
-      setUploadStatus('Please add at least 1 comparison group');
+      setUploadStatus('Please add at least 1 Analysis Window');
       return;
     }
 
     const missingMarkers = comparisonGroups.filter(g => !g.eventMarker);
     if (missingMarkers.length > 0) {
-      setUploadStatus('Please select event markers for all comparison groups');
+      setUploadStatus('Please select event markers for all Analysis Windows');
       return;
     }
 
@@ -378,22 +381,21 @@ function AnalysisViewer() {
   };
 
   const plotTypes = [
-    { id: 'timeseries', label: 'Time Series' },
+    { id: 'lineplot', label: 'Line Plot' },
     { id: 'boxplot', label: 'Box Plot' },
-    { id: 'violin', label: 'Violin Plot' },
     { id: 'histogram', label: 'Histogram' },
     { id: 'poincare', label: 'Poincaré Plot' },
-    { id: 'psd', label: 'Power Spectral Density' },
     { id: 'scatter', label: 'Scatter Plot' },
-    { id: 'heatmap', label: 'Heatmap' },
-    { id: 'barchart', label: 'Bar Chart' },
-    { id: 'errorbar', label: 'Error Bar Plot' },
-    { id: 'correlation', label: 'Correlation Matrix' },
-    { id: 'kde', label: 'Distribution (KDE)' },
-    { id: 'areaplot', label: 'Area Plot' },
-    { id: 'radar', label: 'Radar Chart' },
-    { id: 'qqplot', label: 'Q-Q Plot' }
+    { id: 'barchart', label: 'Bar Chart' }
   ];
+
+  const methodTypes = [
+    { id: 'raw_data', label: 'Raw Data Analysis' },
+    { id: 'event_locked', label: 'Average Signal Around Event' },
+    { id: 'peak_detection', label: 'Identify Peaks' },
+    { id: 'rolling_average', label: 'Time Domain Analysis' },
+    { id: 'baseline_correction', label: 'Normalize to Pre-Event Baseline' }
+  ]
 
   // const testTimestampMatching = async () => {
   //   const selectedMetricsList = Object.keys(selectedMetrics).filter(m => selectedMetrics[m]);
@@ -588,7 +590,7 @@ function AnalysisViewer() {
               </div>
             )}
 
-            {/* Plot Types Selection */}
+            {/* Plot Types Selection
             {availableMetrics.length > 0 && (
               <div className="metrics-section">
                 <div className="metrics-header">
@@ -618,8 +620,8 @@ function AnalysisViewer() {
                   ))}
                 </div>
               </div>
-            )}
-            
+            )} */}
+
             {/* Analysis Configuration */}
             {availableEventMarkers.length > 0 && (
               <div className="analysis-config-section">
@@ -629,7 +631,7 @@ function AnalysisViewer() {
                   {comparisonGroups.map((group, index) => (
                     <div key={group.id} className="comparison-group-card">
                       <div className="card-header">
-                        <h4 className="group-title">Comparison Group {index + 1}</h4>
+                        <h4 className="group-title">Analysis Window {index + 1}</h4>
                         {comparisonGroups.length > 1 && (
                           <button 
                             onClick={() => removeComparisonGroup(group.id)}
@@ -676,6 +678,38 @@ function AnalysisViewer() {
                           <option value="">All conditions</option>
                           {availableConditions.map(condition => (
                             <option key={condition} value={condition}>{condition}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Plot Type Dropdown */}
+                      <div className="window-config">
+                        <label className="config-label">Plot Type</label>
+                        <select
+                          className="config-select"
+                          value={window.plotType}
+                          onChange={(e) => updateComparisonGroup(window.id, 'plotType', e.target.value)}
+                        >
+                          {plotTypes.map((type) => (
+                            <option key={type.value} value={type.value}>
+                              {type.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Analysis Method Dropdown */}
+                      <div className="window-config">
+                        <label className="config-label">Analysis Method</label>
+                        <select
+                          className="config-select"
+                          value={group.analysisMethod}
+                          onChange={(e) => updateComparisonGroup(group.id, 'analysisMethod', e.target.value)}
+                        >
+                          {methodTypes.map((method) => (
+                            <option key={method.value} value={method.value}>
+                              {method.label}
+                            </option>
                           ))}
                         </select>
                       </div>
@@ -733,7 +767,7 @@ function AnalysisViewer() {
                     onClick={addComparisonGroup}
                     className="add-group-btn"
                   >
-                    + Add Comparison Group
+                    + Analysis Window
                   </button>
                 </div>
               </div>
@@ -776,6 +810,19 @@ function AnalysisViewer() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+      {/* Processing Overlay */}
+      {isAnalyzing && (
+        <div className="processing-overlay">
+          <div className="spinner-container">
+            <div className="spinner"></div>
+            <p className="processing-text">Analyzing Your Data</p>
+            <p className="processing-subtext">
+              This may take a few moments...<br />
+              Please do not close this window
+            </p>
           </div>
         </div>
       )}
