@@ -72,6 +72,8 @@ function AnalysisViewer() {
   const [isScanning, setIsScanning] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [results, setResults] = useState(null);
+  const [showWizard, setShowWizard] = useState(true);
+  const [currentStep, setCurrentStep] = useState(0);
   // const [isTesting, setIsTesting] = useState(false);
   // const [testResults, setTestResults] = useState(null);
 
@@ -475,6 +477,54 @@ function AnalysisViewer() {
   //     setIsTesting(false);
   //   }
   // };
+  const wizardSteps = [
+    {
+      title: "Select Subject Folder",
+      description: "Start by clicking the 'Browse' button to select a subject folder containing your biometric data files.",
+      details: "The system will scan for required files including CSV data files, event markers, and experimental conditions."
+    },
+    {
+      title: "Review File Structure",
+      description: "After selecting a folder, verify that all required files were found.",
+      details: "Check the file structure panel to ensure CSV files, event markers (events.txt), and conditions (conditions.txt) are present. Missing files will be highlighted in red."
+    },
+    {
+      title: "Select Metrics to Analyze",
+      description: "Choose which biometric metrics you want to analyze from the available options.",
+      details: "Use 'Select All' or 'Deselect All' for quick selection, or individually check the metrics you need. The selected count will be displayed."
+    },
+    {
+      title: "Configure Analysis Windows",
+      description: "Set up baseline and analysis time windows for your data.",
+      details: "Choose from preset options (Baseline/Post-Injection) or define custom time ranges. Configure both baseline and analysis windows according to your experimental protocol."
+    },
+    {
+      title: "Set Up Comparison Groups",
+      description: "Define comparison groups for statistical analysis.",
+      details: "Add groups by clicking the '+ Add Comparison Group' button. For each group, provide a label and select the conditions to include. You can add multiple groups for comprehensive comparisons."
+    },
+    {
+      title: "Run Analysis",
+      description: "Click 'Run Analysis' to process your data and generate results.",
+      details: "The system will perform statistical analysis and generate visualizations. Results will open in a new tab automatically."
+    }
+  ];
+
+  const handleNextStep = () => {
+    if (currentStep < wizardSteps.length - 1) {
+      setCurrentStep(currentStep + 1);
+    }
+  };
+
+  const handlePrevStep = () => {
+    if (currentStep > 0) {
+      setCurrentStep(currentStep - 1);
+    }
+  };
+
+  const handleBreadcrumbClick = (stepIndex) => {
+    setCurrentStep(stepIndex);
+  };
 
   return (
     <div className="container">
@@ -483,16 +533,20 @@ function AnalysisViewer() {
         
         <div className="folder-select-section">
           <label className="input-label">
-            Select Subject Folder:
+           
           </label>
           <input 
             type="file" 
+            id="folder-input-hidden"
+            className="folder-input-hidden"
             webkitdirectory="true"
             directory="true"
             multiple
             onChange={handleFolderSelect}
-            className="folder-input"
           />
+          <label htmlFor="folder-input-hidden" className="browse-button">
+            Browse For Subject Folder
+          </label>
           {selectedFolder && (
             <div className="folder-selected">
               ✓ Folder: <strong>{selectedFolder}</strong>
@@ -681,6 +735,23 @@ function AnalysisViewer() {
                           ))}
                         </select>
                       </div>
+                      
+                      {/* Available metric dropdown */}
+                      <div className="window-config">
+                        <label className="config-label">Biometric Tag</label>
+                        <select
+                          className="config-select"
+                          value={window.metric}
+                          onChange={(e) => updateComparisonGroup(window.id, 'metric', e.target.value)}
+                        >
+                          <option value="">Select Metric</option>
+                          {availableMetrics.map(metric => (
+                            <option key={metric} value={metric}>
+                              {metric}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
 
                       {/* Plot Type Dropdown */}
                       <div className="window-config">
@@ -825,6 +896,73 @@ function AnalysisViewer() {
             </p>
           </div>
         </div>
+      )}
+
+      {/* Instruction Wizard */}
+      {showWizard ? (
+        <div className="instruction-wizard">
+          <div className="wizard-header">
+            <h3 className="wizard-title">User Guide</h3>
+            <button 
+              className="wizard-close-btn"
+              onClick={() => setShowWizard(false)}
+              aria-label="Close wizard"
+            >
+              ×
+            </button>
+          </div>
+          
+          <div className="wizard-breadcrumbs">
+            {wizardSteps.map((step, index) => (
+              <div
+                key={index}
+                className={`breadcrumb-item ${currentStep === index ? 'active' : ''}`}
+                onClick={() => handleBreadcrumbClick(index)}
+              >
+                Step {index + 1}
+              </div>
+            ))}
+          </div>
+          
+          <div className="wizard-content">
+            <div className="wizard-step-number">{currentStep + 1}</div>
+            <h4 className="wizard-step-title">{wizardSteps[currentStep].title}</h4>
+            <p className="wizard-step-description">
+              {wizardSteps[currentStep].description}
+            </p>
+            <div className="wizard-highlight">
+              <strong>Details:</strong> {wizardSteps[currentStep].details}
+            </div>
+          </div>
+          
+          <div className="wizard-footer">
+            <button
+              className="wizard-nav-btn prev"
+              onClick={handlePrevStep}
+              disabled={currentStep === 0}
+            >
+              ← Back
+            </button>
+            
+            <div className="wizard-progress">
+              Step {currentStep + 1} of {wizardSteps.length}
+            </div>
+            
+            <button
+              className="wizard-nav-btn next"
+              onClick={handleNextStep}
+              disabled={currentStep === wizardSteps.length - 1}
+            >
+              Next →
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          className="wizard-toggle-btn"
+          onClick={() => setShowWizard(true)}
+          aria-label="Open instruction wizard"
+        />
       )}
     </div>
   );

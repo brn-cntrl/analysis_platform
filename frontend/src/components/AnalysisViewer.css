@@ -40,6 +40,36 @@
   font-size: 14px;
 }
 
+.folder-input-hidden {
+  display: none;
+}
+
+.browse-button {
+  display: inline-block;
+  padding: 12px 24px;
+  background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.browse-button:hover {
+  background: linear-gradient(135deg, #45a049 0%, #3d8b40 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(76, 175, 80, 0.3);
+}
+
+.browse-button:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
 .folder-selected {
   color: #4CAF50;
   font-size: 14px;
@@ -946,25 +976,273 @@
   text-align: center;
 }
 
-/* Pulse animation for additional visual interest */
-.spinner-container::before {
-  content: '';
-  position: absolute;
-  width: 80px;
-  height: 80px;
-  border: 2px solid #2196F3;
-  border-radius: 50%;
-  animation: pulse 2s ease-out infinite;
-  opacity: 0;
+/* ==================== INSTRUCTION WIZARD ==================== */
+
+.instruction-wizard {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  width: 380px;
+  background-color: white;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 100px);
+  border: 2px solid #4a90e2;
+  animation: slideInFromRight 0.4s ease-out;
 }
 
-@keyframes pulse {
-  0% {
-    transform: scale(0.8);
-    opacity: 0.8;
-  }
-  100% {
-    transform: scale(1.5);
+@keyframes slideInFromRight {
+  from {
+    transform: translateX(450px);
     opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.wizard-header {
+  background: linear-gradient(135deg, #4a90e2 0%, #357abd 100%);
+  color: white;
+  padding: 16px 20px;
+  border-radius: 10px 10px 0 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.wizard-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wizard-title::before {
+  content: "📘";
+  font-size: 20px;
+}
+
+.wizard-close-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wizard-close-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: rotate(90deg);
+}
+
+.wizard-breadcrumbs {
+  padding: 12px 20px;
+  background-color: #f8f9fa;
+  border-bottom: 1px solid #e0e0e0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.breadcrumb-item {
+  font-size: 12px;
+  color: #666;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.breadcrumb-item:hover:not(.active) {
+  color: #4a90e2;
+}
+
+.breadcrumb-item.active {
+  color: #4a90e2;
+  font-weight: 600;
+}
+
+.breadcrumb-item:not(:last-child)::after {
+  content: "›";
+  color: #999;
+  font-size: 14px;
+}
+
+.wizard-content {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 200px;
+}
+
+.wizard-step-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: linear-gradient(135deg, #4a90e2 0%, #357abd 100%);
+  color: white;
+  border-radius: 50%;
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.wizard-step-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #2c3e50;
+  margin: 0 0 12px 0;
+}
+
+.wizard-step-description {
+  font-size: 14px;
+  color: #555;
+  line-height: 1.7;
+  margin-bottom: 16px;
+}
+
+.wizard-step-description ul {
+  margin: 12px 0;
+  padding-left: 20px;
+}
+
+.wizard-step-description li {
+  margin-bottom: 8px;
+}
+
+.wizard-step-description strong {
+  color: #2c3e50;
+}
+
+.wizard-highlight {
+  background-color: #fff3cd;
+  padding: 12px;
+  border-left: 4px solid #ffc107;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #856404;
+  margin-top: 12px;
+}
+
+.wizard-footer {
+  padding: 16px 20px;
+  border-top: 1px solid #e0e0e0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  background-color: #fafafa;
+  border-radius: 0 0 10px 10px;
+}
+
+.wizard-nav-btn {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wizard-nav-btn.prev {
+  background-color: white;
+  color: #4a90e2;
+  border: 2px solid #4a90e2;
+}
+
+.wizard-nav-btn.prev:hover:not(:disabled) {
+  background-color: #4a90e2;
+  color: white;
+}
+
+.wizard-nav-btn.next {
+  background: linear-gradient(135deg, #4a90e2 0%, #357abd 100%);
+  color: white;
+}
+
+.wizard-nav-btn.next:hover:not(:disabled) {
+  transform: translateX(2px);
+  box-shadow: 0 4px 12px rgba(74, 144, 226, 0.3);
+}
+
+.wizard-nav-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.wizard-progress {
+  flex: 1;
+  text-align: center;
+  font-size: 13px;
+  color: #666;
+  font-weight: 500;
+}
+
+.wizard-toggle-btn {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  width: 56px;
+  height: 56px;
+  background: linear-gradient(135deg, #4a90e2 0%, #357abd 100%);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  font-size: 24px;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(74, 144, 226, 0.4);
+  transition: all 0.3s;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wizard-toggle-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 20px rgba(74, 144, 226, 0.5);
+}
+
+.wizard-toggle-btn::before {
+  content: "?";
+  font-weight: 700;
+  font-size: 28px;
+}
+
+/* Mobile Responsiveness */
+@media (max-width: 768px) {
+  .instruction-wizard {
+    width: calc(100vw - 40px);
+    left: 20px;
+    right: 20px;
+    bottom: 20px;
+  }
+  
+  .wizard-toggle-btn {
+    bottom: 20px;
+    right: 20px;
   }
 }
