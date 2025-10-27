@@ -76,6 +76,50 @@ function AnalysisViewer() {
   const [currentStep, setCurrentStep] = useState(0);
   // const [isTesting, setIsTesting] = useState(false);
   // const [testResults, setTestResults] = useState(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(!!localStorage.getItem('studentId'));
+  const [loginStudentId, setLoginStudentId] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [showRegister, setShowRegister] = useState(false);
+  const [registerName, setRegisterName] = useState('');
+  const [registerEmail, setRegisterEmail] = useState('');
+  const [registerStudentId, setRegisterStudentId] = useState('');
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoginError('');
+    
+    const trimmedId = loginStudentId.trim().toLowerCase();
+    if (!trimmedId) {
+      setLoginError('Please enter your student ID');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ student_id: trimmedId })
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        localStorage.setItem('studentId', trimmedId);
+        localStorage.setItem('studentName', data.name);
+        setIsLoggedIn(true);
+      } else {
+        setLoginError(data.error || 'Student ID not found');
+      }
+    } catch (error) {
+      setLoginError('Unable to connect to server');
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.clear();
+    setIsLoggedIn(false);
+    setLoginStudentId('');
+  };
 
   // Analysis Configuration State
   const [analyzeHRV, setAnalyzeHRV] = useState(false);
@@ -92,6 +136,7 @@ function AnalysisViewer() {
       customEnd: 30
     }
   ]);
+
   const [nextGroupId, setNextGroupId] = useState(2);
 
   const addComparisonGroup = () => {
@@ -331,6 +376,7 @@ function AnalysisViewer() {
     formData.append('selected_metrics', JSON.stringify(selectedMetricsList));
     formData.append('comparison_groups', JSON.stringify(comparisonGroups));
     formData.append('analyze_hrv', JSON.stringify(analyzeHRV));
+    formData.append('student_id', localStorage.getItem('studentId'));
 
     try {
       setIsAnalyzing(true);
@@ -526,8 +572,153 @@ function AnalysisViewer() {
     setCurrentStep(stepIndex);
   };
 
+  if (!isLoggedIn) {
+    const handleRegister = async (e) => {
+      e.preventDefault();
+      setLoginError('');
+      
+      if (!registerName.trim() || !registerEmail.trim() || !registerStudentId.trim()) {
+        setLoginError('First name, last name, and email are required');
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            first_name: registerName.trim(),
+            last_name: registerEmail.trim(),
+            email: registerStudentId.trim()
+          })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          alert(`Registration successful!\n\nYour Student ID is: ${data.student_id}\n\nPlease use this ID to login.`);
+          setShowRegister(false);
+          setRegisterName('');
+          setRegisterEmail('');
+          setRegisterStudentId('');
+          setLoginError('');
+        } else {
+          setLoginError(data.error || 'Registration failed');
+        }
+      } catch (error) {
+        setLoginError('Unable to connect to server');
+      }
+    };
+    return (
+      <div className="container">
+        <div className="header-card login-card">
+          <h2 className="main-title">🧠 Cognitive Science Lab</h2>
+          <p className="login-subtitle">Data Analysis Platform</p>
+          
+          {!showRegister ? (
+            // LOGIN FORM
+            <form onSubmit={handleLogin} className="folder-select-section">
+              <label className="input-label">Student ID</label>
+              <input
+                type="text"
+                className="folder-input"
+                value={loginStudentId}
+                onChange={(e) => setLoginStudentId(e.target.value)}
+                placeholder="e.g., jsmith2024"
+                autoFocus
+              />
+              
+              {loginError && (
+                <div className="status-message error">{loginError}</div>
+              )}
+              
+              <button type="submit" className="browse-button">Login</button>
+              
+              <div className="login-divider">
+                <p className="login-help-text">Don't have a Student ID?</p>
+                <button 
+                  type="button"
+                  onClick={() => setShowRegister(true)}
+                  className="browse-button create-id-btn"
+                >
+                  Create New ID
+                </button>
+              </div>
+            </form>
+          ) : (
+            // REGISTRATION FORM
+            <form onSubmit={handleRegister} className="folder-select-section">
+              <div className="form-input-group">
+                <label className="input-label">First Name *</label>
+                <input
+                  type="text"
+                  className="folder-input"
+                  value={registerName}
+                  onChange={(e) => setRegisterName(e.target.value)}
+                  placeholder="e.g., John"
+                  autoFocus
+                />
+              </div>
+              
+              <div className="form-input-group">
+                <label className="input-label">Last Name *</label>
+                <input
+                  type="text"
+                  className="folder-input"
+                  value={registerEmail}
+                  onChange={(e) => setRegisterEmail(e.target.value)}
+                  placeholder="e.g., Smith"
+                />
+              </div>
+              
+              <div className="form-input-group">
+                <label className="input-label">Email *</label>
+                <input
+                  type="email"
+                  className="folder-input"
+                  value={registerStudentId}
+                  onChange={(e) => setRegisterStudentId(e.target.value)}
+                  placeholder="e.g., jsmith@university.edu"
+                />
+              </div>
+              
+              {loginError && (
+                <div className="status-message error">{loginError}</div>
+              )}
+              
+              <div className="register-buttons">
+                <button type="submit" className="browse-button register-btn">
+                  Register
+                </button>
+                
+                <button 
+                  type="button"
+                  onClick={() => {
+                    setShowRegister(false);
+                    setRegisterName('');
+                    setRegisterEmail('');
+                    setRegisterStudentId('');
+                    setLoginError('');
+                  }}
+                  className="browse-button back-to-login-btn"
+                >
+                  Back to Login
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="container">
+      <div className="student-header">
+        <span className="student-info-text">
+          Logged in as: <strong>{localStorage.getItem('studentName')}</strong> ({localStorage.getItem('studentId')})
+        </span>
+        <button onClick={handleLogout} className="logout-btn">Logout</button>
+      </div>
       <div className="header-card">
         <h1 className="main-title">Experiment Data Analysis</h1>
         

@@ -31,9 +31,90 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max
 
+STUDENTS_FILE = 'data/students.json'
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+def load_students():
+    """Load students from JSON file"""
+    if os.path.exists(STUDENTS_FILE):
+        with open(STUDENTS_FILE, 'r') as f:
+            return json.load(f)
+    return {}
+
+def save_students(students):
+    """Save students to JSON file"""
+    os.makedirs('data', exist_ok=True)
+    with open(STUDENTS_FILE, 'w') as f:
+        json.dump(students, f, indent=2)
+
+# LOGIN ENDPOINT
+@app.route('/api/login', methods=['POST'])
+def login():
+    data = request.json
+    student_id = data.get('student_id', '').lower().strip()
+    
+    students = load_students()
+    
+    if student_id in students:
+        return jsonify({
+            'success': True, 
+            'name': students[student_id]['name']
+        }), 200
+    
+    return jsonify({'error': 'Student ID not found'}), 404
+
+def generate_student_id(first_name, last_name, students):
+    """Generate a unique student ID from first name and last name"""
+    from datetime import datetime
+    
+    # Create base ID: first letter of first name + last name + year
+    base_id = (first_name[0] + last_name).lower().replace(' ', '')
+    year = datetime.now().year
+    
+    # Try with year first
+    student_id = f"{base_id}{year}"
+    
+    # If ID exists, append a number
+    counter = 1
+    while student_id in students:
+        student_id = f"{base_id}{year}_{counter}"
+        counter += 1
+    
+    return student_id
+
+# REGISTER ENDPOINT
+@app.route('/api/register', methods=['POST'])
+def register():
+    data = request.json
+    first_name = data.get('first_name', '').strip()
+    last_name = data.get('last_name', '').strip()
+    email = data.get('email', '').strip()
+    
+    if not first_name or not last_name or not email:
+        return jsonify({'error': 'First name, last name, and email are required'}), 400
+    
+    students = load_students()
+    
+    # Generate unique student ID
+    student_id = generate_student_id(first_name, last_name, students)
+    full_name = f"{first_name} {last_name}"
+    
+    students[student_id] = {
+        'name': full_name,
+        'email': email,
+        'registered_at': datetime.now().isoformat(),
+        'total_analyses': 0
+    }
+    
+    save_students(students)
+    
+    return jsonify({
+        'success': True,
+        'student_id': student_id,  # Return generated ID
+        'name': full_name
+    }), 201
 
 @app.route('/api/upload-folder-and-analyze', methods=['POST'])
 def upload_folder_and_analyze():
@@ -58,6 +139,9 @@ def upload_folder_and_analyze():
     if 'files' not in request.files:
         return jsonify({'error': 'No files uploaded'}), 400
     
+    student_id = request.form.get('student_id', 'unknown')
+    subject_folder = os.path.join(app.config['UPLOAD_FOLDER'], student_id, secure_filename(folder_name))
+
     files = request.files.getlist('files')
     paths = request.form.getlist('paths')
     folder_name = request.form.get('folder_name', 'subject_data')
