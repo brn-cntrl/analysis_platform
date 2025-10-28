@@ -151,10 +151,15 @@ def upload_folder_and_analyze():
     if batch_mode:
         selected_subjects = json.loads(request.form.get('selected_subjects', '[]'))
         print(f"\n{'='*60}")
-        print(f"BATCH MODE ANALYSIS")
+        print(f"BATCH MODE DETECTED")
         print(f"Selected subjects: {selected_subjects}")
         print(f"Total subjects: {len(selected_subjects)}")
+        print(f"NOTE: Only processing FIRST subject: {selected_subjects[0] if selected_subjects else 'None'}")
         print(f"{'='*60}\n")
+        
+        # For now, only keep first subject
+        if len(selected_subjects) > 0:
+            selected_subjects = [selected_subjects[0]]
     
     if batch_mode and len(selected_subjects) > 1:
         return jsonify({
@@ -389,85 +394,222 @@ def scan_folder_data():
             print(f"Batch mode detected: {len(detected_subjects)} subjects found")
             print(f"Subjects: {detected_subjects}")
 
-        metrics = set()
-        exclude_tags = {'timesyncs', 'timesyncmap'}
-        
-        for filename in emotibit_filenames:
-            match = re.search(r'_emotibit_ground_truth_([A-Z0-9%]+)\.csv$', filename)
-            if match:
-                metric_tag = match.group(1)
-                if metric_tag.lower() not in exclude_tags:
-                    metrics.add(metric_tag)
-        
-        metrics_list = sorted(list(metrics))
-        print(f"Found {len(metrics_list)} metrics: {metrics_list}")
-        
-        event_markers = []
-        conditions = []
-        if 'event_markers_file' in request.files:
-            event_markers_file = request.files['event_markers_file']
-            print(f"Processing event markers file: {event_markers_file.filename}")
+        # BATCH MODE: Multiple subjects
+        if len(detected_subjects) > 1:
+            print("\n=== BATCH MODE: Calculating intersection ===\n")
             
-            try:
-                file_content = event_markers_file.read()
+            # Initialize per-subject data structures
+            subject_availability = {}
+            for subject in detected_subjects:
+                subject_availability[subject] = {
+                    'metrics': set(),
+                    'event_markers': set(),
+                    'conditions': set()
+                }
+            
+            # Extract metrics from filenames organized by subject
+            exclude_tags = {'timesyncs', 'timesyncmap'}
+            for filename in emotibit_filenames:
+                # Extract subject from filename path
+                # Assuming format: root/subject_xxx/emotibit_data/file.csv
+                parts = filename.split('/')
+                if len(parts) >= 3:
+                    subject = parts[1]
+                    if subject in subject_availability:
+                        match = re.search(r'_emotibit_ground_truth_([A-Z0-9%]+)\.csv$', filename)
+                        if match:
+                            metric_tag = match.group(1)
+                            if metric_tag.lower() not in exclude_tags:
+                                subject_availability[subject]['metrics'].add(metric_tag)
+            
+            # Process event markers files (one per subject)
+            event_markers_files = request.files.getlist('event_markers_files')
+            event_markers_paths = request.form.getlist('event_markers_paths')
+            
+            print(f"Processing {len(event_markers_files)} event markers files")
+            
+            for em_file, em_path in zip(event_markers_files, event_markers_paths):
+                # Extract subject from path
+                parts = em_path.split('/')
+                if len(parts) >= 2:
+                    subject = parts[1]
+                    print(f"  Processing event markers for subject: {subject}")
+                    
+                    if subject in subject_availability:
+                        try:
+                            file_content = em_file.read()
+                            try:
+                                content_str = file_content.decode('utf-8')
+                            except UnicodeDecodeError:
+                                content_str = file_content.decode('latin-1')
+                            
+                            df = pd.read_csv(io.StringIO(content_str))
+                            
+                            # Extract event markers
+                            if 'event_marker' in df.columns:
+                                unique_markers = df['event_marker'].dropna().unique()
+                                processed_markers = set()
+                                for marker in unique_markers:
+                                    marker_str = str(marker)
+                                    if 'prs_' in marker_str.lower():
+                                        prs_match = re.search(r'(prs_\d+)', marker_str, re.IGNORECASE)
+                                        if prs_match:
+                                            processed_markers.add(prs_match.group(1).lower())
+                                        else:
+                                            processed_markers.add(marker_str)
+                                    else:
+                                        processed_markers.add(marker_str)
+                                
+                                subject_availability[subject]['event_markers'].update(processed_markers)
+                                print(f"    Found {len(processed_markers)} event markers")
+                            
+                            # Extract conditions
+                            if 'condition' in df.columns:
+                                unique_conditions = df['condition'].dropna().unique()
+                                subject_availability[subject]['conditions'].update([str(c) for c in unique_conditions])
+                                print(f"    Found {len(unique_conditions)} conditions")
+                            
+                            # Reset file pointer
+                            em_file.seek(0)
+                        except Exception as e:
+                            print(f"    ERROR processing event markers for {subject}: {e}")
+            
+            # Calculate intersection across all subjects
+            if len(subject_availability) > 0:
+                subjects_list = list(subject_availability.keys())
+                
+                # Metrics intersection
+                common_metrics = subject_availability[subjects_list[0]]['metrics'].copy()
+                for subject in subjects_list[1:]:
+                    common_metrics &= subject_availability[subject]['metrics']
+                metrics_list = sorted(list(common_metrics))
+                
+                # Event markers intersection
+                common_markers = subject_availability[subjects_list[0]]['event_markers'].copy()
+                for subject in subjects_list[1:]:
+                    common_markers &= subject_availability[subject]['event_markers']
+                event_markers = sorted(list(common_markers))
+                
+                # Conditions intersection
+                common_conditions = subject_availability[subjects_list[0]]['conditions'].copy()
+                for subject in subjects_list[1:]:
+                    common_conditions &= subject_availability[subject]['conditions']
+                conditions = sorted(list(common_conditions))
+                
+                print(f"\nIntersection results:")
+                print(f"  Common metrics: {len(metrics_list)}")
+                print(f"  Common event markers: {len(event_markers)}")
+                print(f"  Common conditions: {len(conditions)}")
+            else:
+                metrics_list = []
+                event_markers = []
+                conditions = []
+            
+            # Convert sets to lists for JSON serialization
+            subject_availability_json = {}
+            for subject, data in subject_availability.items():
+                subject_availability_json[subject] = {
+                    'metrics': sorted(list(data['metrics'])),
+                    'event_markers': sorted(list(data['event_markers'])),
+                    'conditions': sorted(list(data['conditions']))
+                }
+            
+            return jsonify({
+                'metrics': metrics_list,
+                'metrics_count': len(metrics_list),
+                'event_markers': event_markers,
+                'event_markers_count': len(event_markers),
+                'conditions': conditions,
+                'conditions_count': len(conditions),
+                'subjects': detected_subjects,
+                'subjects_count': len(detected_subjects),
+                'batch_mode': True,
+                'subject_availability': subject_availability_json
+            }), 200
+
+        # SINGLE SUBJECT MODE
+        else:
+            print("\n=== SINGLE SUBJECT MODE ===\n")
+            
+            metrics = set()
+            exclude_tags = {'timesyncs', 'timesyncmap'}
+            
+            for filename in emotibit_filenames:
+                match = re.search(r'_emotibit_ground_truth_([A-Z0-9%]+)\.csv$', filename)
+                if match:
+                    metric_tag = match.group(1)
+                    if metric_tag.lower() not in exclude_tags:
+                        metrics.add(metric_tag)
+            
+            metrics_list = sorted(list(metrics))
+            print(f"Found {len(metrics_list)} metrics: {metrics_list}")
+            
+            event_markers = []
+            conditions = []
+            if 'event_markers_file' in request.files:
+                event_markers_file = request.files['event_markers_file']
+                print(f"Processing event markers file: {event_markers_file.filename}")
                 
                 try:
-                    content_str = file_content.decode('utf-8')
-                except UnicodeDecodeError:
-                    content_str = file_content.decode('latin-1')
-                
-                df = pd.read_csv(io.StringIO(content_str))
-                
-                print(f"Event markers CSV columns: {df.columns.tolist()}")
-                
-                if 'event_marker' in df.columns:
-                    unique_markers = df['event_marker'].dropna().unique()
+                    file_content = event_markers_file.read()
                     
-                    processed_markers = set()
-                    for marker in unique_markers:
-                        marker_str = str(marker)
+                    try:
+                        content_str = file_content.decode('utf-8')
+                    except UnicodeDecodeError:
+                        content_str = file_content.decode('latin-1')
+                    
+                    df = pd.read_csv(io.StringIO(content_str))
+                    
+                    print(f"Event markers CSV columns: {df.columns.tolist()}")
+                    
+                    if 'event_marker' in df.columns:
+                        unique_markers = df['event_marker'].dropna().unique()
                         
-                        # Check if marker contains PRS. Needed because of unique PRS markers.
-                        if 'prs_' in marker_str.lower():
-                            prs_match = re.search(r'(prs_\d+)', marker_str, re.IGNORECASE)
-                            if prs_match:
-                                normalized_prs = prs_match.group(1).lower()
-                                processed_markers.add(normalized_prs)
+                        processed_markers = set()
+                        for marker in unique_markers:
+                            marker_str = str(marker)
+                            
+                            if 'prs_' in marker_str.lower():
+                                prs_match = re.search(r'(prs_\d+)', marker_str, re.IGNORECASE)
+                                if prs_match:
+                                    normalized_prs = prs_match.group(1).lower()
+                                    processed_markers.add(normalized_prs)
+                                else:
+                                    processed_markers.add(marker_str)
                             else:
                                 processed_markers.add(marker_str)
-                        else:
-                            processed_markers.add(marker_str)
+                        
+                        event_markers = sorted(list(processed_markers))
+                        print(f"Found {len(event_markers)} unique event markers: {event_markers}")
+                    else:
+                        print(f"WARNING: 'event_marker' column not found in CSV")
                     
-                    event_markers = sorted(list(processed_markers))
-                    print(f"Found {len(event_markers)} unique event markers: {event_markers}")
-                else:
-                    print(f"WARNING: 'event_marker' column not found in CSV")
-                
-                if 'condition' in df.columns:
-                    unique_conditions = df['condition'].dropna().unique()
-                    conditions = sorted([str(cond) for cond in unique_conditions])
-                    print(f"Found {len(conditions)} unique conditions: {conditions}")
-                else:
-                    print(f"WARNING: 'condition' column not found in CSV")
-                    
-            except Exception as e:
-                error_msg = f"Error reading event markers file: {str(e)}"
-                print(error_msg)
-                import traceback
-                traceback.print_exc()
-        else:
-            print("No event markers file provided")
-        
-        return jsonify({
-            'metrics': metrics_list,
-            'metrics_count': len(metrics_list),
-            'event_markers': event_markers,
-            'event_markers_count': len(event_markers),
-            'conditions': conditions,
-            'conditions_count': len(conditions),
-            'subjects': detected_subjects,  
-            'subjects_count': len(detected_subjects)  
-        }), 200
+                    if 'condition' in df.columns:
+                        unique_conditions = df['condition'].dropna().unique()
+                        conditions = sorted([str(cond) for cond in unique_conditions])
+                        print(f"Found {len(conditions)} unique conditions: {conditions}")
+                    else:
+                        print(f"WARNING: 'condition' column not found in CSV")
+                        
+                except Exception as e:
+                    error_msg = f"Error reading event markers file: {str(e)}"
+                    print(error_msg)
+                    import traceback
+                    traceback.print_exc()
+            else:
+                print("No event markers file provided")
+            
+            return jsonify({
+                'metrics': metrics_list,
+                'metrics_count': len(metrics_list),
+                'event_markers': event_markers,
+                'event_markers_count': len(event_markers),
+                'conditions': conditions,
+                'conditions_count': len(conditions),
+                'subjects': detected_subjects if detected_subjects else [],
+                'subjects_count': len(detected_subjects) if detected_subjects else 0,
+                'batch_mode': False
+            }), 200
         
     except Exception as e:
         error_msg = f"Error scanning folder data: {str(e)}"

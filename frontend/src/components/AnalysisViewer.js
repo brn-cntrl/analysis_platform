@@ -26,6 +26,7 @@ function AnalysisViewer() {
   const [availableSubjects, setAvailableSubjects] = useState([]);
   const [selectedSubjects, setSelectedSubjects] = useState({});
   const [isBatchMode, setIsBatchMode] = useState(false);
+  const [subjectAvailability, setSubjectAvailability] = useState({});
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -182,7 +183,7 @@ function AnalysisViewer() {
 
     const formData = new FormData();
     
-    const emotibitFileList = structure.emotibitFiles.map(f => f.name);
+    const emotibitFileList = structure.emotibitFiles.map(f => f.path);
     formData.append('emotibit_filenames', JSON.stringify(emotibitFileList));
 
     const allPaths = structure.allFiles.map(f => f.webkitRelativePath);
@@ -197,16 +198,21 @@ function AnalysisViewer() {
     
     const detectedSubjects = Array.from(subjectFolders).sort();
     
-    // ADD THIS: Send detected subjects to backend
     if (detectedSubjects.length > 1) {
       formData.append('detected_subjects', JSON.stringify(detectedSubjects));
       setIsBatchMode(true);
+      
+      // Send all event markers files (one per subject)
+      structure.eventMarkersFiles.forEach((emFile, index) => {
+        formData.append('event_markers_files', emFile.file);
+        formData.append('event_markers_paths', emFile.path);
+      });
     } else {
       setIsBatchMode(false);
-    }
-
-    if (structure.eventMarkersFiles && structure.eventMarkersFiles.length > 0) {
-      formData.append('event_markers_file', structure.eventMarkersFiles[0].file);
+      // Single subject - send single event markers file
+      if (structure.eventMarkersFiles && structure.eventMarkersFiles.length > 0) {
+        formData.append('event_markers_file', structure.eventMarkersFiles[0].file);
+      }
     }
 
     try {
@@ -238,11 +244,16 @@ function AnalysisViewer() {
         }
 
         const initialSelection = {};
+
         data.metrics.forEach(metric => {
           initialSelection[metric] = false;
         });
         setSelectedMetrics(initialSelection);
         
+        if (data.subject_availability) {
+          setSubjectAvailability(data.subject_availability);
+        }
+
         const eventMarkersMsg = data.event_markers && data.event_markers.length > 0 
           ? `, ${data.event_markers.length} event markers` 
           : '';
@@ -253,7 +264,13 @@ function AnalysisViewer() {
           ? `, ${data.subjects.length} subjects detected`
           : '';
 
-        setUploadStatus(`Found ${data.metrics.length} metrics${eventMarkersMsg}${conditionsMsg}${subjectsMsg}`);
+        let intersectionMsg = '';
+        if (data.batch_mode && data.subjects && data.subjects.length > 1) {
+          intersectionMsg = `\n📊 Showing ${data.metrics.length} common metrics, ${data.event_markers.length} common markers, ${data.conditions.length} common conditions across ${data.subjects.length} subjects`;
+        }
+
+        setUploadStatus(`Found ${data.metrics.length} metrics${eventMarkersMsg}${conditionsMsg}${subjectsMsg}${intersectionMsg}`);
+      
       } else {
         setUploadStatus(`Error scanning folder: ${data.error}`);
       }
@@ -261,6 +278,51 @@ function AnalysisViewer() {
       setUploadStatus(`Error: ${error.message}`);
     } finally {
       setIsScanning(false);
+    }
+  };
+
+  const updateIntersection = (selectedSubjectsList) => {
+    if (!isBatchMode || Object.keys(subjectAvailability).length === 0) {
+      return;
+    }
+
+    if (selectedSubjectsList.length === 0) {
+      setAvailableMetrics([]);
+      setAvailableEventMarkers([]);
+      setAvailableConditions([]);
+      setUploadStatus('⚠️ No subjects selected');
+      return;
+    }
+
+    if (selectedSubjectsList.length === 1) {
+      // Single subject selected - show all from that subject
+      const subject = selectedSubjectsList[0];
+      const subjectData = subjectAvailability[subject];
+      setAvailableMetrics(subjectData.metrics || []);
+      setAvailableEventMarkers(subjectData.event_markers || []);
+      setAvailableConditions(subjectData.conditions || []);
+      setUploadStatus(`Showing all markers from ${subject}`);
+    } else {
+      // Multiple subjects - calculate intersection
+      const firstSubject = selectedSubjectsList[0];
+      let commonMetrics = new Set(subjectAvailability[firstSubject].metrics || []);
+      let commonMarkers = new Set(subjectAvailability[firstSubject].event_markers || []);
+      let commonConditions = new Set(subjectAvailability[firstSubject].conditions || []);
+
+      selectedSubjectsList.slice(1).forEach(subject => {
+        const subjectData = subjectAvailability[subject];
+        commonMetrics = new Set([...commonMetrics].filter(m => (subjectData.metrics || []).includes(m)));
+        commonMarkers = new Set([...commonMarkers].filter(m => (subjectData.event_markers || []).includes(m)));
+        commonConditions = new Set([...commonConditions].filter(c => (subjectData.conditions || []).includes(c)));
+      });
+
+      setAvailableMetrics(Array.from(commonMetrics).sort());
+      setAvailableEventMarkers(Array.from(commonMarkers).sort());
+      setAvailableConditions(Array.from(commonConditions).sort());
+      
+      setUploadStatus(
+        `${commonMetrics.size} common metrics, ${commonMarkers.size} common markers, ${commonConditions.size} common conditions across ${selectedSubjectsList.length} subjects`
+      );
     }
   };
 
@@ -288,10 +350,15 @@ function AnalysisViewer() {
   };
 
   const handleSubjectToggle = (subject) => {
-    setSelectedSubjects(prev => ({
-      ...prev,
-      [subject]: !prev[subject]
-    }));
+    const newSelection = {
+      ...selectedSubjects,
+      [subject]: !selectedSubjects[subject]
+    };
+    setSelectedSubjects(newSelection);
+    
+    // Recalculate intersection based on new selection
+    const selectedList = Object.keys(newSelection).filter(s => newSelection[s]);
+    updateIntersection(selectedList);
   };
 
   const handleSelectAllSubjects = () => {
@@ -300,6 +367,7 @@ function AnalysisViewer() {
       allSelected[subject] = true;
     });
     setSelectedSubjects(allSelected);
+    updateIntersection(availableSubjects);
   };
 
   const handleDeselectAllSubjects = () => {
@@ -308,6 +376,7 @@ function AnalysisViewer() {
       noneSelected[subject] = false;
     });
     setSelectedSubjects(noneSelected);
+    updateIntersection([]);
   };
 
   const getSelectedSubjectsCount = () => {
@@ -772,43 +841,61 @@ function AnalysisViewer() {
 
       {fileStructure && (
         <div className="two-column-layout">
-          
           {/* LEFT COLUMN */}
           <div className="left-column">
-            
             {/* Detected Files */}
             <div className="file-structure">
-            <h3 className="structure-title">📋 Detected Files</h3>
-            
-            <div className="file-category">
-              <strong>EmotiBit Data:</strong>
-              <span className="file-count">{fileStructure.emotibitFiles.length} file(s)</span>
-            </div>
-            
-            <div className="file-category">
-              <strong>Respiration Data:</strong>
-              <span className="file-count">{fileStructure.respirationFiles.length} file(s)</span>
-            </div>
-            
-            <div className="file-category">
-              <strong>Event Markers:</strong>
-              {fileStructure.eventMarkersFiles.length > 0 ? (
-                <span className="file-count">{fileStructure.eventMarkersFiles.length} file(s)</span>
-              ) : (
-                <span className="file-count">❌ No files found</span>
-              )}
-            </div>
-            
-            <div className="file-category">
-              <strong>SER/Transcription:</strong>
-              {fileStructure.serFiles.length > 0 ? (
-                <span className="file-count"> {fileStructure.serFiles.length} file(s)</span>
-              ) : (
-                <span style={{ color: '#666', fontSize: '14px' }}>⚠️ No files (optional)</span>
-              )}
-            </div>
-          </div>
+              <h3 className="structure-title">📋 Detected Files</h3>
+              
+              <div className="file-category">
+                <strong>EmotiBit Data:</strong>
+                <span className="file-count">{fileStructure.emotibitFiles.length} file(s)</span>
+              </div>
+              
+              <div className="file-category">
+                <strong>Respiration Data:</strong>
+                <span className="file-count">{fileStructure.respirationFiles.length} file(s)</span>
+              </div>
+              
+              <div className="file-category">
+                <strong>Event Markers:</strong>
+                {fileStructure.eventMarkersFiles.length > 0 ? (
+                  <span className="file-count">{fileStructure.eventMarkersFiles.length} file(s)</span>
+                ) : (
+                  <span className="file-count">❌ No files found</span>
+                )}
+              </div>
+              
+              <div className="file-category">
+                <strong>SER/Transcription:</strong>
+                {fileStructure.serFiles.length > 0 ? (
+                  <span className="file-count"> {fileStructure.serFiles.length} file(s)</span>
+                ) : (
+                  <span style={{ color: '#666', fontSize: '14px' }}>⚠️ No files (optional)</span>
+                )}
+              </div>
 
+              {/* Batch Mode Status Message */}
+              {uploadStatus && isBatchMode && (
+                <div className="file-category" style={{ 
+                  marginTop: '15px', 
+                  paddingTop: '15px', 
+                  borderTop: '1px solid #ddd' 
+                }}>
+                  <div style={{ 
+                    padding: '10px', 
+                    // backgroundColor: uploadStatus.includes('⚠️') ? '#fff3cd' : '#d4edda',
+                    // border: `1px solid ${uploadStatus.includes('⚠️') ? '#ffc107' : '#28a745'}`,
+                    borderRadius: '4px',
+                    fontSize: '13px',
+                    lineHeight: '1.5',
+                    whiteSpace: 'pre-line'
+                  }}>
+                    {uploadStatus}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* RIGHT COLUMN */}
@@ -1093,11 +1180,11 @@ function AnalysisViewer() {
             </button>
 
             {/* Status Messages */}
-            {uploadStatus && (
+            {/* {uploadStatus && (
               <div className={`status-message ${uploadStatus.includes('Error') ? 'error' : 'success'}`}>
                 {uploadStatus}
               </div>
-            )}
+            )} */}
 
             {/* Results Redirect */}
             {results && (
