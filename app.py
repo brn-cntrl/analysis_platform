@@ -49,7 +49,6 @@ def save_students(students):
     with open(STUDENTS_FILE, 'w') as f:
         json.dump(students, f, indent=2)
 
-# LOGIN ENDPOINT
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.json
@@ -69,14 +68,11 @@ def generate_student_id(first_name, last_name, students):
     """Generate a unique student ID from first name and last name"""
     from datetime import datetime
     
-    # Create base ID: first letter of first name + last name + year
     base_id = (first_name[0] + last_name).lower().replace(' ', '')
     year = datetime.now().year
     
-    # Try with year first
     student_id = f"{base_id}{year}"
-    
-    # If ID exists, append a number
+
     counter = 1
     while student_id in students:
         student_id = f"{base_id}{year}_{counter}"
@@ -84,7 +80,6 @@ def generate_student_id(first_name, last_name, students):
     
     return student_id
 
-# REGISTER ENDPOINT
 @app.route('/api/register', methods=['POST'])
 def register():
     data = request.json
@@ -97,15 +92,13 @@ def register():
     
     students = load_students()
     
-    # Generate unique student ID
     student_id = generate_student_id(first_name, last_name, students)
     full_name = f"{first_name} {last_name}"
     
     students[student_id] = {
         'name': full_name,
         'email': email,
-        'registered_at': datetime.now().isoformat(),
-        'total_analyses': 0
+        'registered_at': datetime.now().isoformat()
     }
     
     save_students(students)
@@ -140,11 +133,11 @@ def upload_folder_and_analyze():
         return jsonify({'error': 'No files uploaded'}), 400
     
     student_id = request.form.get('student_id', 'unknown')
+    folder_name = request.form.get('folder_name', 'subject_data')
     subject_folder = os.path.join(app.config['UPLOAD_FOLDER'], student_id, secure_filename(folder_name))
 
     files = request.files.getlist('files')
     paths = request.form.getlist('paths')
-    folder_name = request.form.get('folder_name', 'subject_data')
 
     selected_metrics = json.loads(request.form.get('selected_metrics', '[]'))
     comparison_groups = json.loads(request.form.get('comparison_groups', '[]'))
@@ -153,17 +146,30 @@ def upload_folder_and_analyze():
     print(f"Analysis Configuration:")
     print(f"  Selected Metrics: {selected_metrics}")
     
+    batch_mode = request.form.get('batch_mode', 'false') == 'true'
+    selected_subjects = []
+    if batch_mode:
+        selected_subjects = json.loads(request.form.get('selected_subjects', '[]'))
+        print(f"\n{'='*60}")
+        print(f"BATCH MODE ANALYSIS")
+        print(f"Selected subjects: {selected_subjects}")
+        print(f"Total subjects: {len(selected_subjects)}")
+        print(f"{'='*60}\n")
+    
+    if batch_mode and len(selected_subjects) > 1:
+        return jsonify({
+            'message': 'Batch mode acknowledged',
+            'batch_mode': True,
+            'selected_subjects': selected_subjects,
+            'subject_count': len(selected_subjects),
+            'note': 'Batch processing not yet implemented - this is a test response'
+        }), 200
+    
     if not files or len(files) == 0:
         return jsonify({'error': 'No files in upload'}), 400
     
     try:
-        subject_folder = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(folder_name))
-        
-        if os.path.exists(subject_folder):
-            shutil.rmtree(subject_folder)
-        
-        os.makedirs(subject_folder, exist_ok=True)
-        
+        # os.makedirs(subject_folder, exist_ok=True)
         file_manifest = {
             'emotibit_files': [],
             'respiration_files': [],
@@ -195,7 +201,7 @@ def upload_folder_and_analyze():
                     'path': file_path,
                     'relative_path': relative_path
                 })
-            elif path_depth == 2 and filename_lower.endswith('_event_markers.csv'):
+            elif filename_lower.endswith('_event_markers.csv'):
                 file_manifest['event_markers'] = {
                     'filename': file.filename,
                     'path': file_path,
@@ -376,6 +382,13 @@ def scan_folder_data():
         emotibit_filenames = json.loads(emotibit_filenames_json)
         print(f"Scanning {len(emotibit_filenames)} EmotiBit files")
         
+        detected_subjects_json = request.form.get('detected_subjects')
+        detected_subjects = []
+        if detected_subjects_json:
+            detected_subjects = json.loads(detected_subjects_json)
+            print(f"Batch mode detected: {len(detected_subjects)} subjects found")
+            print(f"Subjects: {detected_subjects}")
+
         metrics = set()
         exclude_tags = {'timesyncs', 'timesyncmap'}
         
@@ -451,7 +464,9 @@ def scan_folder_data():
             'event_markers': event_markers,
             'event_markers_count': len(event_markers),
             'conditions': conditions,
-            'conditions_count': len(conditions)
+            'conditions_count': len(conditions),
+            'subjects': detected_subjects,  
+            'subjects_count': len(detected_subjects)  
         }), 200
         
     except Exception as e:

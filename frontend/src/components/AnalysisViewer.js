@@ -1,63 +1,3 @@
-/**
- * AnalysisViewer Component
- * 
- * This React component provides a user interface for uploading and analyzing experiment data from a subject folder.
- * It supports selecting biometric metrics, configuring analysis comparison groups, and running analysis via backend API endpoints.
- * 
- * @component
- * 
- * @example
- * <AnalysisViewer />
- * 
- * @returns {JSX.Element} The rendered AnalysisViewer UI.
- * 
- * @description
- * - Allows users to select a subject folder containing experiment data files.
- * - Scans the folder for required files (EmotiBit data, respiration data, event markers, SER/transcription).
- * - Displays detected files and available biometric metrics.
- * - Enables selection/deselection of metrics and configuration of comparison groups for analysis.
- * - Supports custom time window configuration for each comparison group.
- * - Handles uploading selected files and analysis configuration to the backend for processing.
- * - Displays status messages and redirects to results upon successful analysis.
- * 
- * @state
- * @property {string|null} selectedFolder - Name of the selected folder.
- * @property {Object|null} fileStructure - Structure containing detected files and their metadata.
- * @property {string[]} availableMetrics - List of available biometric metrics detected in the folder.
- * @property {string[]} availableEventMarkers - List of available event markers.
- * @property {string[]} availableConditions - List of available condition markers.
- * @property {Object} selectedMetrics - Object mapping metric names to boolean selection state.
- * @property {string} uploadStatus - Status message for upload and analysis operations.
- * @property {boolean} isScanning - Indicates if folder scanning is in progress.
- * @property {boolean} isAnalyzing - Indicates if analysis is in progress.
- * @property {Object|null} results - Analysis results returned from the backend.
- * @property {Array<Object>} comparisonGroups - Array of analysis comparison group configurations.
- * @property {number} nextGroupId - Next available ID for a new comparison group.
- * 
- * @functions
- * @function addComparisonGroup - Adds a new comparison group to the configuration.
- * @function removeComparisonGroup - Removes a comparison group by ID.
- * @function updateComparisonGroup - Updates a field in a comparison group.
- * @function handleFolderSelect - Handles folder selection and scans for required files.
- * @function scanFolderData - Sends folder data to backend to detect metrics, event markers, and conditions.
- * @function handleMetricToggle - Toggles selection state for a biometric metric.
- * @function handleSelectAll - Selects all available metrics.
- * @function handleDeselectAll - Deselects all metrics.
- * @function uploadAndAnalyze - Uploads selected files and configuration to backend and runs analysis.
- * @function getSelectedCount - Returns the count of selected metrics.
- * 
- * @api
- * - POST /api/scan-folder-data: Scans folder for metrics, event markers, and conditions.
- * - POST /api/upload-folder-and-analyze: Uploads files and configuration, runs analysis.
- * 
- * @css
- * - Uses styles from 'AnalysisViewer.css'.
- * 
- * @see
- * - Backend API endpoints for scanning and analysis.
- * - Results page at '/results' for viewing analysis output.
- */
-
 import React, { useState } from 'react';
 import './AnalysisViewer.css';
 
@@ -83,6 +23,9 @@ function AnalysisViewer() {
   const [registerName, setRegisterName] = useState('');
   const [registerEmail, setRegisterEmail] = useState('');
   const [registerStudentId, setRegisterStudentId] = useState('');
+  const [availableSubjects, setAvailableSubjects] = useState([]);
+  const [selectedSubjects, setSelectedSubjects] = useState({});
+  const [isBatchMode, setIsBatchMode] = useState(false);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -122,7 +65,6 @@ function AnalysisViewer() {
   };
 
   // Analysis Configuration State
-  const [analyzeHRV, setAnalyzeHRV] = useState(false);
   const [comparisonGroups, setComparisonGroups] = useState([
     {
       id: 1,
@@ -183,15 +125,14 @@ function AnalysisViewer() {
     const structure = {
       emotibitFiles: [],
       respirationFiles: [],
-      serFile: null,
-      eventMarkersFile: null,
+      serFiles: [],
+      eventMarkersFiles: [],
       allFiles: files
     };
 
     files.forEach(file => {
       const path = file.webkitRelativePath;
       const fileName = file.name.toLowerCase();
-      const pathDepth = path.split('/').length;
 
       if (path.includes('emotibit_data/') && fileName.endsWith('.csv')) {
         structure.emotibitFiles.push({
@@ -205,26 +146,23 @@ function AnalysisViewer() {
           path: path,
           file: file
         });
-      } else if (pathDepth === 2 && fileName.endsWith('_event_markers.csv')) {
-        structure.eventMarkersFile = {
+      } else if (fileName.endsWith('_event_markers.csv')) {
+        structure.eventMarkersFiles.push({
           name: file.name,
           path: path,
           file: file
-        };
+        });
       } else if (fileName.includes('ser') || fileName.includes('transcription')) {
-        structure.serFile = {
+        structure.serFiles.push({
           name: file.name,
           path: path,
           file: file
-        };
+        });
       }
 
-      console.log('Checking file:', fileName);
-      if (fileName.includes('_pi.csv')) {
-        console.log('Found PPG file!');
-        structure.hasPPGFiles = true;
-        console.log('hasPPGFiles:', structure.hasPPGFiles);
-      }
+      structure.hasPPGFiles = structure.emotibitFiles.some(f => 
+        f.name.includes('_PI.csv') || f.name.includes('_PR.csv') || f.name.includes('_PG.csv')
+      );
     });
 
     setFileStructure(structure);
@@ -247,8 +185,28 @@ function AnalysisViewer() {
     const emotibitFileList = structure.emotibitFiles.map(f => f.name);
     formData.append('emotibit_filenames', JSON.stringify(emotibitFileList));
 
-    if (structure.eventMarkersFile) {
-      formData.append('event_markers_file', structure.eventMarkersFile.file);
+    const allPaths = structure.allFiles.map(f => f.webkitRelativePath);
+    const subjectFolders = new Set();
+    allPaths.forEach(path => {
+      const parts = path.split('/');
+      if (parts.length >= 3) {
+        // Path like: root/subject_001/emotibit_data/file.csv
+        subjectFolders.add(parts[1]);
+      }
+    });
+    
+    const detectedSubjects = Array.from(subjectFolders).sort();
+    
+    // ADD THIS: Send detected subjects to backend
+    if (detectedSubjects.length > 1) {
+      formData.append('detected_subjects', JSON.stringify(detectedSubjects));
+      setIsBatchMode(true);
+    } else {
+      setIsBatchMode(false);
+    }
+
+    if (structure.eventMarkersFiles && structure.eventMarkersFiles.length > 0) {
+      formData.append('event_markers_file', structure.eventMarkersFiles[0].file);
     }
 
     try {
@@ -260,10 +218,25 @@ function AnalysisViewer() {
       const data = await response.json();
       
       if (response.ok) {
-        setAvailableMetrics(data.metrics);
+        // Add HRV to metrics if PPG files are available
+        const metrics = data.metrics || [];
+        if (structure.hasPPGFiles && !metrics.includes('HRV')) {
+          metrics.push('HRV');
+        }
+        setAvailableMetrics(metrics);
+        
         setAvailableEventMarkers(data.event_markers || []);
         setAvailableConditions(data.conditions || []);
-        
+
+        if (data.subjects && data.subjects.length > 0) {
+          setAvailableSubjects(data.subjects);
+          const initialSelection = {};
+          data.subjects.forEach(subject => {
+            initialSelection[subject] = true; // Default to all selected
+          });
+          setSelectedSubjects(initialSelection);
+        }
+
         const initialSelection = {};
         data.metrics.forEach(metric => {
           initialSelection[metric] = false;
@@ -276,7 +249,11 @@ function AnalysisViewer() {
         const conditionsMsg = data.conditions && data.conditions.length > 0
           ? `, ${data.conditions.length} conditions`
           : '';
-        setUploadStatus(`Found ${data.metrics.length} metrics${eventMarkersMsg}${conditionsMsg}`);
+        const subjectsMsg = data.subjects && data.subjects.length > 0
+          ? `, ${data.subjects.length} subjects detected`
+          : '';
+
+        setUploadStatus(`Found ${data.metrics.length} metrics${eventMarkersMsg}${conditionsMsg}${subjectsMsg}`);
       } else {
         setUploadStatus(`Error scanning folder: ${data.error}`);
       }
@@ -310,10 +287,45 @@ function AnalysisViewer() {
     setSelectedMetrics(noneSelected);
   };
 
+  const handleSubjectToggle = (subject) => {
+    setSelectedSubjects(prev => ({
+      ...prev,
+      [subject]: !prev[subject]
+    }));
+  };
+
+  const handleSelectAllSubjects = () => {
+    const allSelected = {};
+    availableSubjects.forEach(subject => {
+      allSelected[subject] = true;
+    });
+    setSelectedSubjects(allSelected);
+  };
+
+  const handleDeselectAllSubjects = () => {
+    const noneSelected = {};
+    availableSubjects.forEach(subject => {
+      noneSelected[subject] = false;
+    });
+    setSelectedSubjects(noneSelected);
+  };
+
+  const getSelectedSubjectsCount = () => {
+    return Object.values(selectedSubjects).filter(Boolean).length;
+  };
+
   const uploadAndAnalyze = async () => {
     if (!fileStructure || !fileStructure.allFiles) {
       setUploadStatus('Please select a subject folder');
       return;
+    }
+
+    if (isBatchMode) {
+      const selectedSubjectsList = Object.keys(selectedSubjects).filter(s => selectedSubjects[s]);
+      if (selectedSubjectsList.length === 0) {
+        setUploadStatus('Please select at least one subject to analyze');
+        return;
+      }
     }
 
     if (comparisonGroups.length < 1) {
@@ -328,7 +340,7 @@ function AnalysisViewer() {
     }
 
     const selectedMetricsList = Object.keys(selectedMetrics).filter(m => selectedMetrics[m]);
-    if (selectedMetricsList.length === 0 && !analyzeHRV) {
+    if (selectedMetricsList.length === 0) {
       setUploadStatus('Please select at least one biometric metric');
       return;
     }
@@ -344,26 +356,32 @@ function AnalysisViewer() {
     }
     
     selectedMetricsList.forEach(metric => {
-      const metricFile = fileStructure.emotibitFiles.find(f => 
-        f.name.includes(`_${metric}.csv`)
-      );
-      if (metricFile) {
-        filesToUpload.push(metricFile.file);
-        pathsToUpload.push(metricFile.path);
+      // HRV requires PPG files, not a direct metric file
+      if (metric === 'HRV') {
+        ['PI', 'PR', 'PG'].forEach(ppgType => {
+          const ppgFile = fileStructure.emotibitFiles.find(f => 
+            f.name.includes(`_${ppgType}.csv`)
+          );
+          if (ppgFile && !filesToUpload.includes(ppgFile.file)) {
+            filesToUpload.push(ppgFile.file);
+            pathsToUpload.push(ppgFile.path);
+          }
+        });
+      } else {
+        // Regular metric file
+        const metricFile = fileStructure.emotibitFiles.find(f => 
+          f.name.includes(`_${metric}.csv`)
+        );
+        if (metricFile) {
+          filesToUpload.push(metricFile.file);
+          pathsToUpload.push(metricFile.path);
+        }
+      }
+      if (fileStructure.eventMarkersFiles && fileStructure.eventMarkersFiles.length > 0) {
+        filesToUpload.push(fileStructure.eventMarkersFiles[0].file);
+        pathsToUpload.push(fileStructure.eventMarkersFiles[0].path);
       }
     });
-
-    if (analyzeHRV) {
-      ['PI', 'PR', 'PG'].forEach(ppgType => {
-        const ppgFile = fileStructure.emotibitFiles.find(f => 
-          f.name.includes(`_${ppgType}.csv`)
-        );
-        if (ppgFile) {
-          filesToUpload.push(ppgFile.file);
-          pathsToUpload.push(ppgFile.path);
-        }
-      });
-    }
 
     console.log(`Uploading ${filesToUpload.length} files for analysis:`, pathsToUpload.map(p => p.split('/').pop()));
     
@@ -375,8 +393,14 @@ function AnalysisViewer() {
     formData.append('folder_name', selectedFolder);
     formData.append('selected_metrics', JSON.stringify(selectedMetricsList));
     formData.append('comparison_groups', JSON.stringify(comparisonGroups));
-    formData.append('analyze_hrv', JSON.stringify(analyzeHRV));
+    formData.append('analyze_hrv', JSON.stringify(selectedMetricsList.includes('HRV')));
     formData.append('student_id', localStorage.getItem('studentId'));
+
+    const selectedSubjectsList = Object.keys(selectedSubjects).filter(s => selectedSubjects[s]);
+    if (selectedSubjectsList.length > 1) {
+      formData.append('selected_subjects', JSON.stringify(selectedSubjectsList));
+      formData.append('batch_mode', 'true');
+    }
 
     try {
       setIsAnalyzing(true);
@@ -612,7 +636,7 @@ function AnalysisViewer() {
     return (
       <div className="container">
         <div className="header-card login-card">
-          <h2 className="main-title">🧠 Cognitive Science Lab</h2>
+          <h2 className="main-title">UCSD XRLab</h2>
           <p className="login-subtitle">Data Analysis Platform</p>
           
           {!showRegister ? (
@@ -736,7 +760,7 @@ function AnalysisViewer() {
             onChange={handleFolderSelect}
           />
           <label htmlFor="folder-input-hidden" className="browse-button">
-            Browse For Subject Folder
+            Browse For Subject Data
           </label>
           {selectedFolder && (
             <div className="folder-selected">
@@ -754,32 +778,36 @@ function AnalysisViewer() {
             
             {/* Detected Files */}
             <div className="file-structure">
-              <h3 className="structure-title">Detected Files:</h3>
-              
-              <div className="file-category">
-                <strong>EmotiBit Data:</strong>
-                <span className="file-count">{fileStructure.emotibitFiles.length} files</span>
-              </div>
-
-              <div className="file-category">
-                <strong>Respiration Data:</strong>
-                <span className="file-count">{fileStructure.respirationFiles.length} files</span>
-              </div>
-
-              <div className="file-category">
-                <strong>Event Markers:</strong>
-                <span className={fileStructure.eventMarkersFile ? "file-found" : "file-missing"}>
-                  {fileStructure.eventMarkersFile ? `✓ ${fileStructure.eventMarkersFile.name}` : '✗ Not found'}
-                </span>
-              </div>
-
-              <div className="file-category">
-                <strong>SER/Transcription:</strong>
-                <span className={fileStructure.serFile ? "file-found" : "file-missing"}>
-                  {fileStructure.serFile ? `✓ ${fileStructure.serFile.name}` : '✗ Not found'}
-                </span>
-              </div>
+            <h3 className="structure-title">📋 Detected Files</h3>
+            
+            <div className="file-category">
+              <strong>EmotiBit Data:</strong>
+              <span className="file-count">{fileStructure.emotibitFiles.length} file(s)</span>
             </div>
+            
+            <div className="file-category">
+              <strong>Respiration Data:</strong>
+              <span className="file-count">{fileStructure.respirationFiles.length} file(s)</span>
+            </div>
+            
+            <div className="file-category">
+              <strong>Event Markers:</strong>
+              {fileStructure.eventMarkersFiles.length > 0 ? (
+                <span className="file-count">{fileStructure.eventMarkersFiles.length} file(s)</span>
+              ) : (
+                <span className="file-count">❌ No files found</span>
+              )}
+            </div>
+            
+            <div className="file-category">
+              <strong>SER/Transcription:</strong>
+              {fileStructure.serFiles.length > 0 ? (
+                <span className="file-count"> {fileStructure.serFiles.length} file(s)</span>
+              ) : (
+                <span style={{ color: '#666', fontSize: '14px' }}>⚠️ No files (optional)</span>
+              )}
+            </div>
+          </div>
 
           </div>
 
@@ -808,19 +836,6 @@ function AnalysisViewer() {
                 </div>
                 
                 <div className="metrics-grid">
-                  {fileStructure.hasPPGFiles && (
-                    <>
-                      {console.log('RENDERING HRV CHECKBOX NOW')}
-                      <label className="metric-checkbox" >
-                        <input
-                          type="checkbox"
-                          checked={analyzeHRV}
-                          onChange={(e) => setAnalyzeHRV(e.target.checked)}
-                        />
-                        <span className="metric-label">HRV</span>
-                      </label>
-                    </>
-                  )}
                   {availableMetrics.map(metric => (
                     <label key={metric} className="metric-checkbox">
                       <input
@@ -829,6 +844,39 @@ function AnalysisViewer() {
                         onChange={() => handleMetricToggle(metric)}
                       />
                       <span className="metric-label">{metric}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Subject Selection Section - Only show in batch mode */}
+            {isBatchMode && availableSubjects.length > 0 && (
+              <div className="subjects-section">
+                <div className="subjects-header">
+                  <h3 className="section-title">Select Subjects to Analyze</h3>
+                  <div className="subjects-controls">
+                    <button onClick={handleSelectAllSubjects} className="metric-control-btn">
+                      Select All
+                    </button>
+                    <button onClick={handleDeselectAllSubjects} className="metric-control-btn">
+                      Deselect All
+                    </button>
+                    <span className="selected-count">
+                      {getSelectedSubjectsCount()} selected
+                    </span>
+                  </div>
+                </div>
+
+                <div className="subjects-grid">
+                  {availableSubjects.map((subject) => (
+                    <label key={subject} className="metric-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={selectedSubjects[subject] || false}
+                        onChange={() => handleSubjectToggle(subject)}
+                      />
+                      <span className="metric-label">{subject}</span>
                     </label>
                   ))}
                 </div>

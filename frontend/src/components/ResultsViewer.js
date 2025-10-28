@@ -34,9 +34,14 @@ function ResultsViewer() {
   useEffect(() => {
     const storedResults = sessionStorage.getItem('analysisResults');
     if (storedResults) {
-      const parsed = JSON.parse(storedResults);
-      setResults(parsed);
-      setTimestamp(new Date(parsed.timestamp).toLocaleString());
+      try {
+        const parsed = JSON.parse(storedResults);
+        setResults(parsed);
+        setTimestamp(new Date(parsed.timestamp).toLocaleString());
+      } catch (error) {
+        console.error('Failed to parse analysis results:', error);
+        sessionStorage.removeItem('analysisResults');
+      }
     }
   }, []);
 
