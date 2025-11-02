@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './AnalysisViewer.css';
 
 function AnalysisViewer() {
@@ -39,6 +39,27 @@ function AnalysisViewer() {
   const [selectedPlotType, setSelectedPlotType] = useState('lineplot');
   const [configIssues, setConfigIssues] = useState([]);
   const [lastAnalysisStatus, setLastAnalysisStatus] = useState(null);
+
+  // Debug: Monitor when availableMetrics changes
+  useEffect(() => {
+    console.log('availableMetrics changed:', availableMetrics);
+    console.log('HRV included:', availableMetrics.includes('HRV'));
+  }, [availableMetrics]);
+
+  // Validate configuration when reaching review step (step 6)
+  useEffect(() => {
+    if (wizardStep === 6 && showConfigWizard) {
+      console.log('Reached review step, validating configuration...');
+      console.log('Current state:', {
+        selectedSubjects,
+        selectedMetrics,
+        selectedEvents,
+        subjectAvailability
+      });
+      validateConfiguration();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wizardStep, showConfigWizard]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -132,6 +153,12 @@ function AnalysisViewer() {
       f.name.includes('_PI.csv') || f.name.includes('_PR.csv') || f.name.includes('_PG.csv')
     );
 
+    console.log('=== Folder Structure Analysis ===');
+    console.log('Total EmotiBit files:', structure.emotibitFiles.length);
+    console.log('EmotiBit filenames:', structure.emotibitFiles.map(f => f.name));
+    console.log('PPG files detected:', structure.hasPPGFiles);
+    console.log('=================================');
+
     setFileStructure(structure);
     setUploadStatus(`Folder "${folderName}" selected with ${files.length} files`);
 
@@ -187,10 +214,24 @@ function AnalysisViewer() {
       const data = await response.json();
       
       if (response.ok) {
-        const metrics = data.metrics || [];
-        if (structure.hasPPGFiles && !metrics.includes('HRV')) {
+        let metrics = [...(data.metrics || [])];
+        
+        const hasPPGFiles = structure.hasPPGFiles || 
+                           structure.emotibitFiles.some(f => 
+                             f.name.includes('_PI.csv') || 
+                             f.name.includes('_PR.csv') || 
+                             f.name.includes('_PG.csv')
+                           );
+        
+        console.log('PPG Files detected:', hasPPGFiles);
+        console.log('Metrics from backend:', metrics);
+        
+        if (hasPPGFiles && !metrics.includes('HRV')) {
+          console.log('Adding HRV to metrics list');
           metrics.push('HRV');
         }
+        
+        console.log('Final metrics list:', metrics);
         setAvailableMetrics(metrics);
         
         setAvailableEventMarkers(data.event_markers || []);
@@ -205,11 +246,13 @@ function AnalysisViewer() {
           setSelectedSubjects(initialSelection);
         }
 
-        const initialSelection = {};
+        // Initialize selectedMetrics with ALL metrics including HRV
+        const initialMetricSelection = {};
         metrics.forEach(metric => {
-          initialSelection[metric] = false;
+          initialMetricSelection[metric] = false;
         });
-        setSelectedMetrics(initialSelection);
+        console.log('Initializing selectedMetrics with:', Object.keys(initialMetricSelection));
+        setSelectedMetrics(initialMetricSelection);
         
         if (data.subject_availability) {
           setSubjectAvailability(data.subject_availability);
@@ -256,7 +299,21 @@ function AnalysisViewer() {
     if (selectedSubjectsList.length === 1) {
       const subject = selectedSubjectsList[0];
       const subjectData = subjectAvailability[subject];
-      setAvailableMetrics(subjectData.metrics || []);
+      let metrics = [...(subjectData.metrics || [])];
+      
+      // Check if this subject has PPG files and add HRV
+      const subjectHasPPG = subjectData.has_ppg_files || 
+                           (fileStructure && fileStructure.hasPPGFiles) ||
+                           false;
+      
+      console.log(`Subject ${subject}: has_ppg_files = ${subjectData.has_ppg_files}, fileStructure.hasPPGFiles = ${fileStructure?.hasPPGFiles}`);
+      
+      if (subjectHasPPG && !metrics.includes('HRV')) {
+        metrics.push('HRV');
+        console.log(`Adding HRV for subject ${subject} (has PPG files)`);
+      }
+      
+      setAvailableMetrics(metrics);
       setAvailableEventMarkers(subjectData.event_markers || []);
       setAvailableConditions(subjectData.conditions || []);
       setBatchStatusMessage(`Showing all markers from ${subject}`);
@@ -273,12 +330,26 @@ function AnalysisViewer() {
         commonConditions = new Set([...commonConditions].filter(c => (subjectData.conditions || []).includes(c)));
       });
 
-      setAvailableMetrics(Array.from(commonMetrics).sort());
+      let finalMetrics = Array.from(commonMetrics).sort();
+      
+      // Check if ALL selected subjects have PPG files, then add HRV to intersection
+      const allHavePPG = selectedSubjectsList.every(subject => 
+        subjectAvailability[subject]?.has_ppg_files || false
+      ) || (fileStructure && fileStructure.hasPPGFiles);
+      
+      console.log(`Multi-subject: allHavePPG = ${allHavePPG}`);
+      
+      if (allHavePPG && !finalMetrics.includes('HRV')) {
+        finalMetrics.push('HRV');
+        console.log('Adding HRV to intersection (all subjects have PPG files)');
+      }
+
+      setAvailableMetrics(finalMetrics);
       setAvailableEventMarkers(Array.from(commonMarkers).sort());
       setAvailableConditions(Array.from(commonConditions).sort());
       
       setBatchStatusMessage(
-        `📊 ${commonMetrics.size} common metrics, ${commonMarkers.size} common markers, ${commonConditions.size} common conditions across ${selectedSubjectsList.length} subjects`
+        `📊 ${finalMetrics.length} common metrics, ${commonMarkers.size} common markers, ${commonConditions.size} common conditions across ${selectedSubjectsList.length} subjects`
       );
     }
   };
@@ -306,9 +377,14 @@ function AnalysisViewer() {
   };
 
   const openConfigWizard = () => {
+    console.log('=== Opening Configuration Wizard ===');
+    console.log('Available metrics:', availableMetrics);
+    console.log('Selected metrics:', selectedMetrics);
+    console.log('File structure hasPPGFiles:', fileStructure?.hasPPGFiles);
+    console.log('Is batch mode:', isBatchMode);
+    console.log('====================================');
     setWizardStep(0);
     setShowConfigWizard(true);
-    validateConfiguration();
   };
 
   const closeConfigWizard = () => {
@@ -318,9 +394,6 @@ function AnalysisViewer() {
   const nextWizardStep = () => {
     if (wizardStep < 7) {
       setWizardStep(wizardStep + 1);
-      if (wizardStep === 6) {
-        validateConfiguration();
-      }
     }
   };
 
@@ -332,9 +405,6 @@ function AnalysisViewer() {
 
   const goToWizardStep = (step) => {
     setWizardStep(step);
-    if (step === 6) {
-      validateConfiguration();
-    }
   };
 
   const addEventMarker = () => {
@@ -371,7 +441,8 @@ function AnalysisViewer() {
       issues.push('No event markers selected');
     }
     
-    if (subjectAvailability && selectedSubjectsList.length > 0) {
+    // Only check subject availability if we have subjects selected and data is loaded
+    if (subjectAvailability && Object.keys(subjectAvailability).length > 0 && selectedSubjectsList.length > 0) {
       selectedSubjectsList.forEach(subject => {
         const subjectData = subjectAvailability[subject];
         if (!subjectData) return;
@@ -394,6 +465,7 @@ function AnalysisViewer() {
       });
     }
     
+    console.log('Validation complete. Issues found:', issues);
     setConfigIssues(issues);
   };
 
@@ -529,34 +601,44 @@ function AnalysisViewer() {
 
   const wizardSteps = [
     {
-      title: "Select Subject Folder",
-      description: "Start by clicking the 'Browse' button to select a subject folder containing your biometric data files.",
-      details: "The system will scan for required files including CSV data files, event markers, and experimental conditions."
+      title: "Browse for Subject Data",
+      description: "Click the 'Browse For Subject Data' button to select your experiment folder.",
+      details: "The folder should contain subject subfolders with emotibit_data, event markers, and other experimental files. The system will automatically detect all available subjects and data files."
     },
     {
-      title: "Review File Structure",
-      description: "After selecting a folder, verify that all required files were found.",
-      details: "Check the file structure panel to ensure CSV files, event markers (events.txt), and conditions (conditions.txt) are present. Missing files will be highlighted in red."
+      title: "Review Detected Files",
+      description: "After selecting a folder, review the detected files in the left panel.",
+      details: "You'll see counts for EmotiBit data files, respiration data, event markers, and SER/transcription files. If multiple subjects are detected, you'll see a summary of common metrics and markers across all subjects."
     },
     {
-      title: "Select Metrics to Analyze",
-      description: "Choose which biometric metrics you want to analyze from the available options.",
-      details: "Use 'Select All' or 'Deselect All' for quick selection, or individually check the metrics you need. The selected count will be displayed."
+      title: "Configure Analysis",
+      description: "Click the 'Configure Analysis' button to open the configuration wizard.",
+      details: "The wizard will guide you through 8 steps to set up your analysis. You can navigate using the Next/Previous buttons or click the breadcrumbs at the top to jump between steps."
     },
     {
-      title: "Configure Analysis Windows",
-      description: "Set up baseline and analysis time windows for your data.",
-      details: "Choose from preset options (Baseline/Post-Injection) or define custom time ranges. Configure both baseline and analysis windows according to your experimental protocol."
+      title: "Select Analysis Type & Subjects",
+      description: "Choose between inter-subject (single) or intra-subject (multi) analysis, then select which subjects to include.",
+      details: "Inter-subject analyzes one subject's data. Intra-subject compares data across multiple subjects. Check the boxes next to the subjects you want to analyze."
     },
     {
-      title: "Set Up Comparison Groups",
-      description: "Define comparison groups for statistical analysis.",
-      details: "Add groups by clicking the '+ Add Comparison Group' button. For each group, provide a label and select the conditions to include. You can add multiple groups for comprehensive comparisons."
+      title: "Choose Biometric Tags",
+      description: "Select which physiological metrics you want to analyze (HR, EDA, TEMP, etc.).",
+      details: "If multiple subjects are selected, use the Union/Intersection toggle to show either all tags across subjects (Union) or only tags common to all subjects (Intersection). HRV will appear automatically if PPG files are detected."
     },
     {
-      title: "Run Analysis",
-      description: "Click 'Run Analysis' to process your data and generate results.",
-      details: "The system will perform statistical analysis and generate visualizations. Results will open in a new tab automatically."
+      title: "Select Event Markers",
+      description: "Choose which experimental events to analyze. You can add multiple event windows for comparison.",
+      details: "Click '+ Add Event Window' to compare multiple events or time periods. Select 'All (entire experiment)' to analyze the full recording. The Union/Intersection toggle works the same as for tags."
+    },
+    {
+      title: "Configure Conditions & Methods",
+      description: "Filter by experimental conditions, choose your analysis method, and select visualization type.",
+      details: "Set conditions for each event window (or select 'All conditions'). Choose an analysis method (Raw Data, Mean, Moving Average, etc.) and plot type (Line Plot, Box Plot, etc.)."
+    },
+    {
+      title: "Review & Run Analysis",
+      description: "Review your configuration in the summary, then click 'Run Analysis' to process your data.",
+      details: "The review step will show any configuration issues (like missing files or markers). Fix any issues by navigating back to the relevant step. Once validated, proceed to run your analysis. Results will open in a new tab automatically."
     }
   ];
 
@@ -955,16 +1037,22 @@ function AnalysisViewer() {
                   )}
 
                   <div className="tag-grid">
-                    {availableMetrics.map(metric => (
-                      <label key={metric} className="tag-checkbox">
-                        <input
-                          type="checkbox"
-                          checked={selectedMetrics[metric] || false}
-                          onChange={() => handleMetricToggle(metric)}
-                        />
-                        <span>{metric}</span>
-                      </label>
-                    ))}
+                    {availableMetrics.length === 0 ? (
+                      <div className="no-metrics-message">
+                        No biometric metrics detected. Please ensure your folder contains EmotiBit data files.
+                      </div>
+                    ) : (
+                      availableMetrics.map(metric => (
+                        <label key={metric} className="tag-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={selectedMetrics[metric] || false}
+                            onChange={() => handleMetricToggle(metric)}
+                          />
+                          <span>{metric}</span>
+                        </label>
+                      ))
+                    )}
                   </div>
                   
                   <div className="selection-summary">
@@ -1275,7 +1363,7 @@ function AnalysisViewer() {
 
               {wizardStep === 7 && (
                 <div className="wizard-section wizard-final">
-                  <h3 className="wizard-section-title">Run Analysis</h3>
+                  {/* <h3 className="wizard-section-title">Run Analysis</h3> */}
                   <p className="wizard-section-description">
                     Click the button below to start processing your data. This may take a few moments.
                   </p>
@@ -1285,7 +1373,7 @@ function AnalysisViewer() {
                     disabled={configIssues.length > 0 || isAnalyzing}
                     className="run-analysis-btn"
                   >
-                    {isAnalyzing ? '⏳ Analyzing...' : '🚀 Run Analysis'}
+                    {isAnalyzing ? '⏳ Analyzing...' : 'Run Analysis'}
                   </button>
 
                   {configIssues.length > 0 && (

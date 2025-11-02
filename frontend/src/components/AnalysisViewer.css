@@ -431,7 +431,6 @@
 }
 
 .wizard-title::before {
-  content: "📘";
   font-size: 20px;
 }
 
