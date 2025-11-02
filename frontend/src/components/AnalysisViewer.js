@@ -14,8 +14,6 @@ function AnalysisViewer() {
   const [results, setResults] = useState(null);
   const [showWizard, setShowWizard] = useState(true);
   const [currentStep, setCurrentStep] = useState(0);
-  // const [isTesting, setIsTesting] = useState(false);
-  // const [testResults, setTestResults] = useState(null);
   const [isLoggedIn, setIsLoggedIn] = useState(!!localStorage.getItem('studentId'));
   const [loginStudentId, setLoginStudentId] = useState('');
   const [loginError, setLoginError] = useState('');
@@ -27,6 +25,20 @@ function AnalysisViewer() {
   const [selectedSubjects, setSelectedSubjects] = useState({});
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [subjectAvailability, setSubjectAvailability] = useState({});
+  const [batchStatusMessage, setBatchStatusMessage] = useState('');
+  
+  // Wizard state
+  const [showConfigWizard, setShowConfigWizard] = useState(false);
+  const [wizardStep, setWizardStep] = useState(0);
+  const [analysisType, setAnalysisType] = useState('inter');
+  const [tagMode, setTagMode] = useState('union');
+  const [eventMode, setEventMode] = useState('union');
+  const [conditionMode, setConditionMode] = useState('union');
+  const [selectedEvents, setSelectedEvents] = useState([{ event: '', condition: 'all' }]);
+  const [selectedAnalysisMethod, setSelectedAnalysisMethod] = useState('raw');
+  const [selectedPlotType, setSelectedPlotType] = useState('lineplot');
+  const [configIssues, setConfigIssues] = useState([]);
+  const [lastAnalysisStatus, setLastAnalysisStatus] = useState(null);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -65,53 +77,6 @@ function AnalysisViewer() {
     setLoginStudentId('');
   };
 
-  // Analysis Configuration State
-  const [comparisonGroups, setComparisonGroups] = useState([
-    {
-      id: 1,
-      label: 'Group 1',
-      eventMarker: '',
-      conditionMarker: '',
-      plotType: 'line',         
-      analysisMethod: 'raw',    
-      timeWindowType: 'full',
-      customStart: -5,
-      customEnd: 30
-    }
-  ]);
-
-  const [nextGroupId, setNextGroupId] = useState(2);
-
-  const addComparisonGroup = () => {
-    const newGroup = {
-      id: nextGroupId,
-      label: `Group ${nextGroupId}`,
-      eventMarker: '',
-      conditionMarker: '',
-      plotType: 'line',
-      analysisMethod: 'raw',
-      timeWindowType: 'full',
-      customStart: -5,
-      customEnd: 30
-    };
-    setComparisonGroups([...comparisonGroups, newGroup]);
-    setNextGroupId(nextGroupId + 1);
-  };
-
-  const removeComparisonGroup = (id) => {
-    if (comparisonGroups.length <= 1) {
-      alert('You must have at least one Analysis Window');
-      return;
-    }
-    setComparisonGroups(comparisonGroups.filter(group => group.id !== id));
-  };
-
-  const updateComparisonGroup = (id, field, value) => {
-    setComparisonGroups(comparisonGroups.map(group => 
-      group.id === id ? { ...group, [field]: value } : group
-    ));
-  };
-
   const handleFolderSelect = async (e) => {
     const files = Array.from(e.target.files);
     
@@ -128,7 +93,8 @@ function AnalysisViewer() {
       respirationFiles: [],
       serFiles: [],
       eventMarkersFiles: [],
-      allFiles: files
+      allFiles: files,
+      hasPPGFiles: false
     };
 
     files.forEach(file => {
@@ -160,11 +126,11 @@ function AnalysisViewer() {
           file: file
         });
       }
-
-      structure.hasPPGFiles = structure.emotibitFiles.some(f => 
-        f.name.includes('_PI.csv') || f.name.includes('_PR.csv') || f.name.includes('_PG.csv')
-      );
     });
+
+    structure.hasPPGFiles = structure.emotibitFiles.some(f => 
+      f.name.includes('_PI.csv') || f.name.includes('_PR.csv') || f.name.includes('_PG.csv')
+    );
 
     setFileStructure(structure);
     setUploadStatus(`Folder "${folderName}" selected with ${files.length} files`);
@@ -191,7 +157,6 @@ function AnalysisViewer() {
     allPaths.forEach(path => {
       const parts = path.split('/');
       if (parts.length >= 3) {
-        // Path like: root/subject_001/emotibit_data/file.csv
         subjectFolders.add(parts[1]);
       }
     });
@@ -202,14 +167,12 @@ function AnalysisViewer() {
       formData.append('detected_subjects', JSON.stringify(detectedSubjects));
       setIsBatchMode(true);
       
-      // Send all event markers files (one per subject)
       structure.eventMarkersFiles.forEach((emFile, index) => {
         formData.append('event_markers_files', emFile.file);
         formData.append('event_markers_paths', emFile.path);
       });
     } else {
       setIsBatchMode(false);
-      // Single subject - send single event markers file
       if (structure.eventMarkersFiles && structure.eventMarkersFiles.length > 0) {
         formData.append('event_markers_file', structure.eventMarkersFiles[0].file);
       }
@@ -224,7 +187,6 @@ function AnalysisViewer() {
       const data = await response.json();
       
       if (response.ok) {
-        // Add HRV to metrics if PPG files are available
         const metrics = data.metrics || [];
         if (structure.hasPPGFiles && !metrics.includes('HRV')) {
           metrics.push('HRV');
@@ -238,14 +200,13 @@ function AnalysisViewer() {
           setAvailableSubjects(data.subjects);
           const initialSelection = {};
           data.subjects.forEach(subject => {
-            initialSelection[subject] = true; // Default to all selected
+            initialSelection[subject] = true;
           });
           setSelectedSubjects(initialSelection);
         }
 
         const initialSelection = {};
-
-        data.metrics.forEach(metric => {
+        metrics.forEach(metric => {
           initialSelection[metric] = false;
         });
         setSelectedMetrics(initialSelection);
@@ -264,13 +225,11 @@ function AnalysisViewer() {
           ? `, ${data.subjects.length} subjects detected`
           : '';
 
-        let intersectionMsg = '';
         if (data.batch_mode && data.subjects && data.subjects.length > 1) {
-          intersectionMsg = `\n📊 Showing ${data.metrics.length} common metrics, ${data.event_markers.length} common markers, ${data.conditions.length} common conditions across ${data.subjects.length} subjects`;
+          const intersectionMsg = `📊 Showing ${data.metrics.length} common metrics, ${data.event_markers.length} common markers, ${data.conditions.length} common conditions across ${data.subjects.length} subjects`;
+          setBatchStatusMessage(intersectionMsg);
         }
-
-        setUploadStatus(`Found ${data.metrics.length} metrics${eventMarkersMsg}${conditionsMsg}${subjectsMsg}${intersectionMsg}`);
-      
+        setUploadStatus(`Found ${metrics.length} metrics${eventMarkersMsg}${conditionsMsg}${subjectsMsg}`);
       } else {
         setUploadStatus(`Error scanning folder: ${data.error}`);
       }
@@ -290,20 +249,18 @@ function AnalysisViewer() {
       setAvailableMetrics([]);
       setAvailableEventMarkers([]);
       setAvailableConditions([]);
-      setUploadStatus('⚠️ No subjects selected');
+      setBatchStatusMessage('⚠️ No subjects selected');
       return;
     }
 
     if (selectedSubjectsList.length === 1) {
-      // Single subject selected - show all from that subject
       const subject = selectedSubjectsList[0];
       const subjectData = subjectAvailability[subject];
       setAvailableMetrics(subjectData.metrics || []);
       setAvailableEventMarkers(subjectData.event_markers || []);
       setAvailableConditions(subjectData.conditions || []);
-      setUploadStatus(`Showing all markers from ${subject}`);
+      setBatchStatusMessage(`Showing all markers from ${subject}`);
     } else {
-      // Multiple subjects - calculate intersection
       const firstSubject = selectedSubjectsList[0];
       let commonMetrics = new Set(subjectAvailability[firstSubject].metrics || []);
       let commonMarkers = new Set(subjectAvailability[firstSubject].event_markers || []);
@@ -320,8 +277,8 @@ function AnalysisViewer() {
       setAvailableEventMarkers(Array.from(commonMarkers).sort());
       setAvailableConditions(Array.from(commonConditions).sort());
       
-      setUploadStatus(
-        `${commonMetrics.size} common metrics, ${commonMarkers.size} common markers, ${commonConditions.size} common conditions across ${selectedSubjectsList.length} subjects`
+      setBatchStatusMessage(
+        `📊 ${commonMetrics.size} common metrics, ${commonMarkers.size} common markers, ${commonConditions.size} common conditions across ${selectedSubjectsList.length} subjects`
       );
     }
   };
@@ -333,22 +290,6 @@ function AnalysisViewer() {
     }));
   };
 
-  const handleSelectAll = () => {
-    const allSelected = {};
-    availableMetrics.forEach(metric => {
-      allSelected[metric] = true;
-    });
-    setSelectedMetrics(allSelected);
-  };
-
-  const handleDeselectAll = () => {
-    const noneSelected = {};
-    availableMetrics.forEach(metric => {
-      noneSelected[metric] = false;
-    });
-    setSelectedMetrics(noneSelected);
-  };
-
   const handleSubjectToggle = (subject) => {
     const newSelection = {
       ...selectedSubjects,
@@ -356,31 +297,104 @@ function AnalysisViewer() {
     };
     setSelectedSubjects(newSelection);
     
-    // Recalculate intersection based on new selection
     const selectedList = Object.keys(newSelection).filter(s => newSelection[s]);
     updateIntersection(selectedList);
   };
 
-  const handleSelectAllSubjects = () => {
-    const allSelected = {};
-    availableSubjects.forEach(subject => {
-      allSelected[subject] = true;
-    });
-    setSelectedSubjects(allSelected);
-    updateIntersection(availableSubjects);
-  };
-
-  const handleDeselectAllSubjects = () => {
-    const noneSelected = {};
-    availableSubjects.forEach(subject => {
-      noneSelected[subject] = false;
-    });
-    setSelectedSubjects(noneSelected);
-    updateIntersection([]);
-  };
-
   const getSelectedSubjectsCount = () => {
     return Object.values(selectedSubjects).filter(Boolean).length;
+  };
+
+  const openConfigWizard = () => {
+    setWizardStep(0);
+    setShowConfigWizard(true);
+    validateConfiguration();
+  };
+
+  const closeConfigWizard = () => {
+    setShowConfigWizard(false);
+  };
+
+  const nextWizardStep = () => {
+    if (wizardStep < 7) {
+      setWizardStep(wizardStep + 1);
+      if (wizardStep === 6) {
+        validateConfiguration();
+      }
+    }
+  };
+
+  const prevWizardStep = () => {
+    if (wizardStep > 0) {
+      setWizardStep(wizardStep - 1);
+    }
+  };
+
+  const goToWizardStep = (step) => {
+    setWizardStep(step);
+    if (step === 6) {
+      validateConfiguration();
+    }
+  };
+
+  const addEventMarker = () => {
+    setSelectedEvents([...selectedEvents, { event: '', condition: 'all' }]);
+  };
+
+  const removeEventMarker = (index) => {
+    if (selectedEvents.length > 1) {
+      setSelectedEvents(selectedEvents.filter((_, i) => i !== index));
+    }
+  };
+
+  const updateEventMarker = (index, field, value) => {
+    const updated = [...selectedEvents];
+    updated[index][field] = value;
+    setSelectedEvents(updated);
+  };
+
+  const validateConfiguration = () => {
+    const issues = [];
+    
+    const selectedSubjectsList = Object.keys(selectedSubjects).filter(s => selectedSubjects[s]);
+    if (selectedSubjectsList.length === 0) {
+      issues.push('No subjects selected');
+    }
+    
+    const selectedMetricsList = Object.keys(selectedMetrics).filter(m => selectedMetrics[m]);
+    if (selectedMetricsList.length === 0) {
+      issues.push('No biometric tags selected');
+    }
+    
+    const hasValidEvent = selectedEvents.some(e => e.event !== '');
+    if (!hasValidEvent) {
+      issues.push('No event markers selected');
+    }
+    
+    if (subjectAvailability && selectedSubjectsList.length > 0) {
+      selectedSubjectsList.forEach(subject => {
+        const subjectData = subjectAvailability[subject];
+        if (!subjectData) return;
+        
+        selectedMetricsList.forEach(metric => {
+          if (metric === 'HRV') return;
+          if (!subjectData.metrics.includes(metric)) {
+            issues.push(`Subject ${subject} missing metric: ${metric}`);
+          }
+        });
+        
+        selectedEvents.forEach((evt, idx) => {
+          if (evt.event && !subjectData.event_markers.includes(evt.event)) {
+            issues.push(`Subject ${subject} missing event: ${evt.event}`);
+          }
+          if (evt.condition !== 'all' && !subjectData.conditions.includes(evt.condition)) {
+            issues.push(`Subject ${subject} missing condition: ${evt.condition}`);
+          }
+        });
+      });
+    }
+    
+    setConfigIssues(issues);
   };
 
   const uploadAndAnalyze = async () => {
@@ -389,28 +403,21 @@ function AnalysisViewer() {
       return;
     }
 
-    if (isBatchMode) {
-      const selectedSubjectsList = Object.keys(selectedSubjects).filter(s => selectedSubjects[s]);
-      if (selectedSubjectsList.length === 0) {
-        setUploadStatus('Please select at least one subject to analyze');
-        return;
-      }
-    }
-
-    if (comparisonGroups.length < 1) {
-      setUploadStatus('Please add at least 1 Analysis Window');
-      return;
-    }
-
-    const missingMarkers = comparisonGroups.filter(g => !g.eventMarker);
-    if (missingMarkers.length > 0) {
-      setUploadStatus('Please select event markers for all Analysis Windows');
+    const selectedSubjectsList = Object.keys(selectedSubjects).filter(s => selectedSubjects[s]);
+    if (selectedSubjectsList.length === 0) {
+      setUploadStatus('Please select at least one subject to analyze');
       return;
     }
 
     const selectedMetricsList = Object.keys(selectedMetrics).filter(m => selectedMetrics[m]);
     if (selectedMetricsList.length === 0) {
       setUploadStatus('Please select at least one biometric metric');
+      return;
+    }
+
+    const hasValidEvent = selectedEvents.some(e => e.event !== '');
+    if (!hasValidEvent) {
+      setUploadStatus('Please select at least one event marker');
       return;
     }
 
@@ -425,7 +432,6 @@ function AnalysisViewer() {
     }
     
     selectedMetricsList.forEach(metric => {
-      // HRV requires PPG files, not a direct metric file
       if (metric === 'HRV') {
         ['PI', 'PR', 'PG'].forEach(ppgType => {
           const ppgFile = fileStructure.emotibitFiles.find(f => 
@@ -437,7 +443,6 @@ function AnalysisViewer() {
           }
         });
       } else {
-        // Regular metric file
         const metricFile = fileStructure.emotibitFiles.find(f => 
           f.name.includes(`_${metric}.csv`)
         );
@@ -461,11 +466,12 @@ function AnalysisViewer() {
 
     formData.append('folder_name', selectedFolder);
     formData.append('selected_metrics', JSON.stringify(selectedMetricsList));
-    formData.append('comparison_groups', JSON.stringify(comparisonGroups));
+    formData.append('selected_events', JSON.stringify(selectedEvents));
+    formData.append('analysis_method', selectedAnalysisMethod);
+    formData.append('plot_type', selectedPlotType);
     formData.append('analyze_hrv', JSON.stringify(selectedMetricsList.includes('HRV')));
     formData.append('student_id', localStorage.getItem('studentId'));
 
-    const selectedSubjectsList = Object.keys(selectedSubjects).filter(s => selectedSubjects[s]);
     if (selectedSubjectsList.length > 1) {
       formData.append('selected_subjects', JSON.stringify(selectedSubjectsList));
       formData.append('batch_mode', 'true');
@@ -475,6 +481,7 @@ function AnalysisViewer() {
       setIsAnalyzing(true);
       setUploadStatus('Uploading folder and running analysis...');
       setResults(null);
+      closeConfigWizard();
 
       const response = await fetch('/api/upload-folder-and-analyze', {
         method: 'POST',
@@ -491,12 +498,14 @@ function AnalysisViewer() {
         console.error('JSON parse error:', parseError);
         console.error('Response text:', responseText);
         setUploadStatus(`Error: Invalid JSON response from server. Check console for details.`);
+        setLastAnalysisStatus({ success: false, message: 'Invalid server response' });
         return;
       }
       
       if (response.ok) {
         setUploadStatus('Analysis completed successfully!');
         setResults(data.results);
+        setLastAnalysisStatus({ success: true, message: 'Analysis completed successfully!' });
 
         sessionStorage.setItem('analysisResults', JSON.stringify(data.results));
 
@@ -505,117 +514,19 @@ function AnalysisViewer() {
         if (!resultsWindow) {
           setUploadStatus('Analysis completed! Please allow pop-ups to view results.');
         }
-
       } else {
         setUploadStatus(`Error: ${data.error}`);
+        setLastAnalysisStatus({ success: false, message: data.error });
       }
     } catch (error) {
       console.error('Fetch error:', error);
       setUploadStatus(`Error: ${error.message}`);
+      setLastAnalysisStatus({ success: false, message: error.message });
     } finally {
       setIsAnalyzing(false);
     }
   };
 
-  const getSelectedCount = () => {
-    return Object.values(selectedMetrics).filter(val => val).length;
-  };
-
-  const plotTypes = [
-    { id: 'lineplot', label: 'Line Plot' },
-    { id: 'boxplot', label: 'Box Plot' },
-    { id: 'histogram', label: 'Histogram' },
-    { id: 'poincare', label: 'Poincaré Plot' },
-    { id: 'scatter', label: 'Scatter Plot' },
-    { id: 'barchart', label: 'Bar Chart' }
-  ];
-
-  const methodTypes = [
-    { id: 'raw_data', label: 'Raw Data Analysis' },
-    { id: 'event_locked', label: 'Average Signal Around Event' },
-    { id: 'peak_detection', label: 'Identify Peaks' },
-    { id: 'rolling_average', label: 'Time Domain Analysis' },
-    { id: 'baseline_correction', label: 'Normalize to Pre-Event Baseline' }
-  ]
-
-  // const testTimestampMatching = async () => {
-  //   const selectedMetricsList = Object.keys(selectedMetrics).filter(m => selectedMetrics[m]);
-    
-  //   if (selectedMetricsList.length === 0) {
-  //     setUploadStatus('Please select at least one biometric metric to test');
-  //     return;
-  //   }
-
-  //   if (!fileStructure || !fileStructure.allFiles) {
-  //     setUploadStatus('Please select a subject folder first');
-  //     return;
-  //   }
-
-  //   // Use the first selected metric for testing
-  //   const metricToTest = selectedMetricsList[0];
-
-  //   try {
-  //     setIsTesting(true);
-  //     setUploadStatus(`Testing timestamp matching for ${metricToTest}...`);
-  //     setTestResults(null);
-
-  //     const formData = new FormData();
-      
-  //     // Only upload the files we need for testing
-  //     const filesToUpload = [];
-  //     const pathsToUpload = [];
-      
-  //     // Find and add the event markers file
-  //     if (fileStructure.eventMarkersFile) {
-  //       filesToUpload.push(fileStructure.eventMarkersFile.file);
-  //       pathsToUpload.push(fileStructure.eventMarkersFile.path);
-  //     }
-      
-  //     // Find and add the specific metric file
-  //     const metricFile = fileStructure.emotibitFiles.find(f => 
-  //       f.name.includes(`_${metricToTest}.csv`)
-  //     );
-      
-  //     if (metricFile) {
-  //       filesToUpload.push(metricFile.file);
-  //       pathsToUpload.push(metricFile.path);
-  //     }
-      
-  //     if (filesToUpload.length !== 2) {
-  //       setUploadStatus(`Error: Could not find required files (event markers and ${metricToTest})`);
-  //       setIsTesting(false);
-  //       return;
-  //     }
-      
-  //     console.log(`Uploading ${filesToUpload.length} files for testing:`, pathsToUpload);
-      
-  //     // Add only the necessary files
-  //     filesToUpload.forEach((file, index) => {
-  //       formData.append('files', file);
-  //       formData.append('paths', pathsToUpload[index]);
-  //     });
-      
-  //     formData.append('selected_metric', metricToTest);
-
-  //     const response = await fetch('/api/test-timestamp-matching', {
-  //       method: 'POST',
-  //       body: formData,
-  //     });
-
-  //     const data = await response.json();
-      
-  //     if (response.ok) {
-  //       setUploadStatus(`Test completed! Found ${data.total_matches} matches. Check terminal for details.`);
-  //       setTestResults(data);
-  //     } else {
-  //       setUploadStatus(`Error: ${data.error}`);
-  //     }
-  //   } catch (error) {
-  //     setUploadStatus(`Error: ${error.message}`);
-  //   } finally {
-  //     setIsTesting(false);
-  //   }
-  // };
   const wizardSteps = [
     {
       title: "Select Subject Folder",
@@ -702,6 +613,7 @@ function AnalysisViewer() {
         setLoginError('Unable to connect to server');
       }
     };
+    
     return (
       <div className="container">
         <div className="header-card login-card">
@@ -709,7 +621,6 @@ function AnalysisViewer() {
           <p className="login-subtitle">Data Analysis Platform</p>
           
           {!showRegister ? (
-            // LOGIN FORM
             <form onSubmit={handleLogin} className="folder-select-section">
               <label className="input-label">Student ID</label>
               <input
@@ -739,7 +650,6 @@ function AnalysisViewer() {
               </div>
             </form>
           ) : (
-            // REGISTRATION FORM
             <form onSubmit={handleRegister} className="folder-select-section">
               <div className="form-input-group">
                 <label className="input-label">First Name *</label>
@@ -783,7 +693,6 @@ function AnalysisViewer() {
                 <button type="submit" className="browse-button register-btn">
                   Register
                 </button>
-                
                 <button 
                   type="button"
                   onClick={() => {
@@ -804,6 +713,7 @@ function AnalysisViewer() {
       </div>
     );
   }
+
   return (
     <div className="container">
       <div className="student-header">
@@ -812,13 +722,10 @@ function AnalysisViewer() {
         </span>
         <button onClick={handleLogout} className="logout-btn">Logout</button>
       </div>
+      
       <div className="header-card">
         <h1 className="main-title">Experiment Data Analysis</h1>
-        
         <div className="folder-select-section">
-          <label className="input-label">
-           
-          </label>
           <input 
             type="file" 
             id="folder-input-hidden"
@@ -840,377 +747,581 @@ function AnalysisViewer() {
       </div>
 
       {fileStructure && (
-        <div className="two-column-layout">
-          {/* LEFT COLUMN */}
-          <div className="left-column">
-            {/* Detected Files */}
-            <div className="file-structure">
-              <h3 className="structure-title">📋 Detected Files</h3>
-              
-              <div className="file-category">
-                <strong>EmotiBit Data:</strong>
-                <span className="file-count">{fileStructure.emotibitFiles.length} file(s)</span>
-              </div>
-              
-              <div className="file-category">
-                <strong>Respiration Data:</strong>
-                <span className="file-count">{fileStructure.respirationFiles.length} file(s)</span>
-              </div>
-              
-              <div className="file-category">
-                <strong>Event Markers:</strong>
-                {fileStructure.eventMarkersFiles.length > 0 ? (
-                  <span className="file-count">{fileStructure.eventMarkersFiles.length} file(s)</span>
-                ) : (
-                  <span className="file-count">❌ No files found</span>
-                )}
-              </div>
-              
-              <div className="file-category">
-                <strong>SER/Transcription:</strong>
-                {fileStructure.serFiles.length > 0 ? (
-                  <span className="file-count"> {fileStructure.serFiles.length} file(s)</span>
-                ) : (
-                  <span style={{ color: '#666', fontSize: '14px' }}>⚠️ No files (optional)</span>
-                )}
-              </div>
-
-              {/* Batch Mode Status Message */}
-              {uploadStatus && isBatchMode && (
-                <div className="file-category" style={{ 
-                  marginTop: '15px', 
-                  paddingTop: '15px', 
-                  borderTop: '1px solid #ddd' 
-                }}>
-                  <div style={{ 
-                    padding: '10px', 
-                    // backgroundColor: uploadStatus.includes('⚠️') ? '#fff3cd' : '#d4edda',
-                    // border: `1px solid ${uploadStatus.includes('⚠️') ? '#ffc107' : '#28a745'}`,
-                    borderRadius: '4px',
-                    fontSize: '13px',
-                    lineHeight: '1.5',
-                    whiteSpace: 'pre-line'
-                  }}>
-                    {uploadStatus}
-                  </div>
-                </div>
+        <div className="main-content-area">
+          <div className="file-structure-card">
+            <h3 className="structure-title">Detected Files</h3>
+            
+            <div className="file-category">
+              <strong>EmotiBit Data:</strong>
+              <span className="file-count">{fileStructure.emotibitFiles.length} file(s)</span>
+            </div>
+            
+            <div className="file-category">
+              <strong>Respiration Data:</strong>
+              <span className="file-count">{fileStructure.respirationFiles.length} file(s)</span>
+            </div>
+            
+            <div className="file-category">
+              <strong>Event Markers:</strong>
+              {fileStructure.eventMarkersFiles.length > 0 ? (
+                <span className="file-count">{fileStructure.eventMarkersFiles.length} file(s)</span>
+              ) : (
+                <span className="file-count">❌ No files found</span>
               )}
             </div>
+            
+            <div className="file-category">
+              <strong>SER/Transcription:</strong>
+              {fileStructure.serFiles.length > 0 ? (
+                <span className="file-count">{fileStructure.serFiles.length} file(s)</span>
+              ) : (
+                <span style={{ color: '#666', fontSize: '14px' }}>⚠️ No files (optional)</span>
+              )}
+            </div>
+
+            {batchStatusMessage && isBatchMode && (
+              <div className="file-category" style={{ 
+                marginTop: '15px', 
+                paddingTop: '15px', 
+                borderTop: '1px solid #ddd' 
+              }}>
+                <div style={{ 
+                  padding: '10px', 
+                  backgroundColor: batchStatusMessage.includes('⚠️') ? '#fff3cd' : '#d4edda',
+                  border: `1px solid ${batchStatusMessage.includes('⚠️') ? '#ffc107' : '#28a745'}`,
+                  borderRadius: '4px',
+                  fontSize: '13px',
+                  lineHeight: '1.5',
+                  whiteSpace: 'pre-line'
+                }}>
+                  {batchStatusMessage}
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* RIGHT COLUMN */}
-          <div className="right-column">
-            
-            {/* Metrics Selection */}
-            {console.log('availableMetrics.length:', availableMetrics.length)}
-            {console.log('Inside metrics-grid, hasPPGFiles:', fileStructure.hasPPGFiles)}
-            {console.log('fileStructure.hasPPGFiles:', fileStructure?.hasPPGFiles)}
-            {availableMetrics.length > 0 && (
-              <div className="metrics-section">
-                <div className="metrics-header">
-                  <h3 className="structure-title">Available Biometric Metrics ({availableMetrics.length})</h3>
-                  <div className="metrics-controls">
-                    <button onClick={handleSelectAll} className="metric-control-btn">
-                      Select All
-                    </button>
-                    <button onClick={handleDeselectAll} className="metric-control-btn">
-                      Deselect All
-                    </button>
-                    <span className="selected-count">
-                      {getSelectedCount()} selected
-                    </span>
-                  </div>
-                </div>
-                
-                <div className="metrics-grid">
-                  {availableMetrics.map(metric => (
-                    <label key={metric} className="metric-checkbox">
-                      <input
-                        type="checkbox"
-                        checked={selectedMetrics[metric] || false}
-                        onChange={() => handleMetricToggle(metric)}
-                      />
-                      <span className="metric-label">{metric}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Subject Selection Section - Only show in batch mode */}
-            {isBatchMode && availableSubjects.length > 0 && (
-              <div className="subjects-section">
-                <div className="subjects-header">
-                  <h3 className="section-title">Select Subjects to Analyze</h3>
-                  <div className="subjects-controls">
-                    <button onClick={handleSelectAllSubjects} className="metric-control-btn">
-                      Select All
-                    </button>
-                    <button onClick={handleDeselectAllSubjects} className="metric-control-btn">
-                      Deselect All
-                    </button>
-                    <span className="selected-count">
-                      {getSelectedSubjectsCount()} selected
-                    </span>
-                  </div>
-                </div>
-
-                <div className="subjects-grid">
-                  {availableSubjects.map((subject) => (
-                    <label key={subject} className="metric-checkbox">
-                      <input
-                        type="checkbox"
-                        checked={selectedSubjects[subject] || false}
-                        onChange={() => handleSubjectToggle(subject)}
-                      />
-                      <span className="metric-label">{subject}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Plot Types Selection
-            {availableMetrics.length > 0 && (
-              <div className="metrics-section">
-                <div className="metrics-header">
-                  <h3 className="structure-title">Select Plot Types</h3>
-                  <div className="metrics-controls">
-                    <span className="selected-count">
-                      Choose visualization methods for your analysis
-                    </span>
-                  </div>
-                </div>
-                
-                <div className="metrics-grid">
-                  {plotTypes.map(plotType => (
-                    <label key={plotType.id} className="metric-checkbox">
-                      <input
-                        type="checkbox"
-                        checked={selectedPlotTypes[plotType.id] || false}
-                        onChange={() => {
-                          setSelectedPlotTypes(prev => ({
-                            ...prev,
-                            [plotType.id]: !prev[plotType.id]
-                          }));
-                        }}
-                      />
-                      <span className="metric-label">{plotType.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )} */}
-
-            {/* Analysis Configuration */}
-            {availableEventMarkers.length > 0 && (
-              <div className="analysis-config-section">
-                <h3 className="structure-title">Analysis Configuration</h3>
-                
-                <div className="comparison-groups-container">
-                  {comparisonGroups.map((group, index) => (
-                    <div key={group.id} className="comparison-group-card">
-                      <div className="card-header">
-                        <h4 className="group-title">Analysis Window {index + 1}</h4>
-                        {comparisonGroups.length > 1 && (
-                          <button 
-                            onClick={() => removeComparisonGroup(group.id)}
-                            className="remove-group-btn"
-                            title="Remove this group"
-                          >
-                            ✖️
-                          </button>
-                        )}
-                      </div>
-
-                      <div className="group-config">
-                        <label className="config-label">Label:</label>
-                        <input
-                          type="text"
-                          className="label-input"
-                          value={group.label}
-                          onChange={(e) => updateComparisonGroup(group.id, 'label', e.target.value)}
-                          placeholder="Enter group name..."
-                        />
-                      </div>
-
-                      <div className="group-config">
-                        <label className="config-label">Event Marker:</label>
-                        <select 
-                          className="config-select"
-                          value={group.eventMarker}
-                          onChange={(e) => updateComparisonGroup(group.id, 'eventMarker', e.target.value)}
-                        >
-                          <option value="">Select event marker...</option>
-                          {availableEventMarkers.map(marker => (
-                            <option key={marker} value={marker}>{marker}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="group-config">
-                        <label className="config-label">Condition Marker:</label>
-                        <select 
-                          className="config-select"
-                          value={group.conditionMarker}
-                          onChange={(e) => updateComparisonGroup(group.id, 'conditionMarker', e.target.value)}
-                        >
-                          <option value="">All conditions</option>
-                          {availableConditions.map(condition => (
-                            <option key={condition} value={condition}>{condition}</option>
-                          ))}
-                        </select>
-                      </div>
-                      
-                      {/* Available metric dropdown */}
-                      <div className="window-config">
-                        <label className="config-label">Biometric Tag</label>
-                        <select
-                          className="config-select"
-                          value={window.metric}
-                          onChange={(e) => updateComparisonGroup(window.id, 'metric', e.target.value)}
-                        >
-                          <option value="">Select Metric</option>
-                          {availableMetrics.map(metric => (
-                            <option key={metric} value={metric}>
-                              {metric}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* Plot Type Dropdown */}
-                      <div className="window-config">
-                        <label className="config-label">Plot Type</label>
-                        <select
-                          className="config-select"
-                          value={window.plotType}
-                          onChange={(e) => updateComparisonGroup(window.id, 'plotType', e.target.value)}
-                        >
-                          {plotTypes.map((type) => (
-                            <option key={type.value} value={type.value}>
-                              {type.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* Analysis Method Dropdown */}
-                      <div className="window-config">
-                        <label className="config-label">Analysis Method</label>
-                        <select
-                          className="config-select"
-                          value={group.analysisMethod}
-                          onChange={(e) => updateComparisonGroup(group.id, 'analysisMethod', e.target.value)}
-                        >
-                          {methodTypes.map((method) => (
-                            <option key={method.value} value={method.value}>
-                              {method.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="group-config">
-                        <label className="config-label">Time Window:</label>
-                        <div className="radio-group">
-                          <label className="radio-label">
-                            <input
-                              type="radio"
-                              checked={group.timeWindowType === 'full'}
-                              onChange={() => updateComparisonGroup(group.id, 'timeWindowType', 'full')}
-                            />
-                            <span>Full event duration</span>
-                          </label>
-                          <label className="radio-label">
-                            <input
-                              type="radio"
-                              checked={group.timeWindowType === 'custom'}
-                              onChange={() => updateComparisonGroup(group.id, 'timeWindowType', 'custom')}
-                            />
-                            <span>Custom offset</span>
-                          </label>
-                        </div>
-                        
-                        {group.timeWindowType === 'custom' && (
-                          <div className="custom-time-inputs">
-                            <div className="time-input-group">
-                              <label>Start:</label>
-                              <input
-                                type="number"
-                                value={group.customStart}
-                                onChange={(e) => updateComparisonGroup(group.id, 'customStart', parseFloat(e.target.value))}
-                                className="time-input"
-                              />
-                              <span>seconds</span>
-                            </div>
-                            <div className="time-input-group">
-                              <label>End:</label>
-                              <input
-                                type="number"
-                                value={group.customEnd}
-                                onChange={(e) => updateComparisonGroup(group.id, 'customEnd', parseFloat(e.target.value))}
-                                className="time-input"
-                              />
-                              <span>seconds</span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-
-                  <button 
-                    onClick={addComparisonGroup}
-                    className="add-group-btn"
-                  >
-                    + Analysis Window
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Run Analysis Button */}
+          <div className="config-action-area">
             <button 
-              onClick={uploadAndAnalyze}
-              disabled={isAnalyzing || !fileStructure || isScanning}
-              className={`analyze-button ${isAnalyzing || !fileStructure || isScanning ? 'disabled' : ''}`}
+              onClick={openConfigWizard}
+              disabled={isScanning || !fileStructure}
+              className="config-analysis-btn"
             >
-              {isAnalyzing ? '⏳ Analyzing...' : isScanning ? '🔍 Scanning...' : 'Run Analysis'}
+              ⚙️ Configure Analysis
             </button>
 
-            {/* Status Messages */}
-            {/* {uploadStatus && (
-              <div className={`status-message ${uploadStatus.includes('Error') ? 'error' : 'success'}`}>
+            {uploadStatus && (
+              <div className={`status-message ${uploadStatus.includes('Error') || uploadStatus.includes('⚠️') ? 'error' : 'success'}`}>
                 {uploadStatus}
               </div>
-            )} */}
+            )}
 
-            {/* Results Redirect */}
+            {lastAnalysisStatus && (
+              <div className={`analysis-status ${lastAnalysisStatus.success ? 'success' : 'error'}`}>
+                {lastAnalysisStatus.success ? '✅' : '❌'} {lastAnalysisStatus.message}
+              </div>
+            )}
+
             {results && (
-              <div className="results-redirect-message">
-                <div className="redirect-card">
-                  <h2 className="redirect-title">✅ Analysis Complete!</h2>
-                  <p className="redirect-text">
-                    Your analysis results have been opened in a new tab. 
-                    If the tab did not open automatically, please check your browser's pop-up settings.
-                  </p>
-                  <button 
-                    onClick={() => {
-                      sessionStorage.setItem('analysisResults', JSON.stringify(results));
-                      window.open('/results', '_blank');
-                    }}
-                    className="reopen-results-button"
-                  >
-                    🔄 Re-open Results Tab
-                  </button>
-                </div>
+              <div className="results-redirect-section">
+                <p className="results-redirect-text">
+                  ✅ Results opened in new tab
+                </p>
+                <button 
+                  onClick={() => {
+                    sessionStorage.setItem('analysisResults', JSON.stringify(results));
+                    window.open('/results', '_blank');
+                  }}
+                  className="reopen-results-btn"
+                >
+                  🔄 Re-open Results
+                </button>
               </div>
             )}
           </div>
         </div>
       )}
-      {/* Processing Overlay */}
+
+      {showConfigWizard && (
+        <div className="config-wizard-overlay">
+          <div className="config-wizard-panel">
+            <div className="wizard-header">
+              <h2 className="wizard-title">Analysis Configuration</h2>
+              <button onClick={closeConfigWizard} className="wizard-close-btn">×</button>
+            </div>
+
+            <div className="wizard-breadcrumbs">
+              {['Type', 'Tags', 'Events', 'Conditions', 'Method', 'Plot', 'Review', 'Run'].map((label, idx) => (
+                <div
+                  key={idx}
+                  className={`breadcrumb ${wizardStep === idx ? 'active' : ''} ${wizardStep > idx ? 'completed' : ''}`}
+                  onClick={() => goToWizardStep(idx)}
+                >
+                  {label}
+                </div>
+              ))}
+            </div>
+
+            <div className="wizard-content">
+              {wizardStep === 0 && (
+                <div className="wizard-section">
+                  <h3 className="wizard-section-title">Analysis Type</h3>
+                  <p className="wizard-section-description">
+                    Choose whether you want to analyze a single subject (inter-subject) or compare across multiple subjects (intra-subject).
+                  </p>
+                  
+                  <div className="analysis-type-options">
+                    <label className="analysis-type-option">
+                      <input
+                        type="radio"
+                        name="analysisType"
+                        value="inter"
+                        checked={analysisType === 'inter'}
+                        onChange={(e) => setAnalysisType(e.target.value)}
+                      />
+                      <div className="option-content">
+                        <strong>Inter-Subject</strong>
+                        <span>Single subject analysis</span>
+                      </div>
+                    </label>
+                    
+                    <label className="analysis-type-option">
+                      <input
+                        type="radio"
+                        name="analysisType"
+                        value="intra"
+                        checked={analysisType === 'intra'}
+                        onChange={(e) => setAnalysisType(e.target.value)}
+                      />
+                      <div className="option-content">
+                        <strong>Intra-Subject</strong>
+                        <span>Multi-subject comparison</span>
+                      </div>
+                    </label>
+                  </div>
+
+                  {availableSubjects.length > 0 && (
+                    <div className="subject-selection">
+                      <h4 className="subsection-title">Select Subjects</h4>
+                      <div className="subject-checklist">
+                        {availableSubjects.map(subject => (
+                          <label key={subject} className="subject-checkbox">
+                            <input
+                              type="checkbox"
+                              checked={selectedSubjects[subject] || false}
+                              onChange={() => handleSubjectToggle(subject)}
+                            />
+                            <span>{subject}</span>
+                          </label>
+                        ))}
+                      </div>
+                      <div className="selection-summary">
+                        {getSelectedSubjectsCount()} of {availableSubjects.length} subjects selected
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {wizardStep === 1 && (
+                <div className="wizard-section">
+                  <h3 className="wizard-section-title">Biometric Tags</h3>
+                  <p className="wizard-section-description">
+                    Select the biometric metrics you want to analyze.
+                  </p>
+
+                  {getSelectedSubjectsCount() > 1 && (
+                    <div className="mode-toggle">
+                      <label className="toggle-option">
+                        <input
+                          type="radio"
+                          name="tagMode"
+                          value="union"
+                          checked={tagMode === 'union'}
+                          onChange={(e) => setTagMode(e.target.value)}
+                        />
+                        <span>Union (all tags across subjects)</span>
+                      </label>
+                      <label className="toggle-option">
+                        <input
+                          type="radio"
+                          name="tagMode"
+                          value="intersection"
+                          checked={tagMode === 'intersection'}
+                          onChange={(e) => setTagMode(e.target.value)}
+                        />
+                        <span>Intersection (common tags only)</span>
+                      </label>
+                    </div>
+                  )}
+
+                  <div className="tag-grid">
+                    {availableMetrics.map(metric => (
+                      <label key={metric} className="tag-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={selectedMetrics[metric] || false}
+                          onChange={() => handleMetricToggle(metric)}
+                        />
+                        <span>{metric}</span>
+                      </label>
+                    ))}
+                  </div>
+                  
+                  <div className="selection-summary">
+                    {Object.values(selectedMetrics).filter(Boolean).length} tags selected
+                  </div>
+                </div>
+              )}
+
+              {wizardStep === 2 && (
+                <div className="wizard-section">
+                  <h3 className="wizard-section-title">Event Markers</h3>
+                  <p className="wizard-section-description">
+                    Select event markers to analyze. You can add multiple event windows for comparison.
+                  </p>
+
+                  {getSelectedSubjectsCount() > 1 && (
+                    <div className="mode-toggle">
+                      <label className="toggle-option">
+                        <input
+                          type="radio"
+                          name="eventMode"
+                          value="union"
+                          checked={eventMode === 'union'}
+                          onChange={(e) => setEventMode(e.target.value)}
+                        />
+                        <span>Union</span>
+                      </label>
+                      <label className="toggle-option">
+                        <input
+                          type="radio"
+                          name="eventMode"
+                          value="intersection"
+                          checked={eventMode === 'intersection'}
+                          onChange={(e) => setEventMode(e.target.value)}
+                        />
+                        <span>Intersection</span>
+                      </label>
+                    </div>
+                  )}
+
+                  <div className="event-list">
+                    {selectedEvents.map((evt, idx) => (
+                      <div key={idx} className="event-item">
+                        <select
+                          value={evt.event}
+                          onChange={(e) => updateEventMarker(idx, 'event', e.target.value)}
+                          className="event-select"
+                        >
+                          <option value="">Select event...</option>
+                          <option value="all">All (entire experiment)</option>
+                          {availableEventMarkers.map(marker => (
+                            <option key={marker} value={marker}>{marker}</option>
+                          ))}
+                        </select>
+                        
+                        {selectedEvents.length > 1 && (
+                          <button
+                            onClick={() => removeEventMarker(idx)}
+                            className="remove-event-btn"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <button onClick={addEventMarker} className="add-event-btn">
+                    + Add Event Window
+                  </button>
+                </div>
+              )}
+
+              {wizardStep === 3 && (
+                <div className="wizard-section">
+                  <h3 className="wizard-section-title">Condition Markers</h3>
+                  <p className="wizard-section-description">
+                    Select conditions to filter your analysis.
+                  </p>
+
+                  {getSelectedSubjectsCount() > 1 && (
+                    <div className="mode-toggle">
+                      <label className="toggle-option">
+                        <input
+                          type="radio"
+                          name="conditionMode"
+                          value="union"
+                          checked={conditionMode === 'union'}
+                          onChange={(e) => setConditionMode(e.target.value)}
+                        />
+                        <span>Union</span>
+                      </label>
+                      <label className="toggle-option">
+                        <input
+                          type="radio"
+                          name="conditionMode"
+                          value="intersection"
+                          checked={conditionMode === 'intersection'}
+                          onChange={(e) => setConditionMode(e.target.value)}
+                        />
+                        <span>Intersection</span>
+                      </label>
+                    </div>
+                  )}
+
+                  <div className="condition-list">
+                    {selectedEvents.map((evt, idx) => (
+                      <div key={idx} className="condition-item">
+                        <label className="condition-label">
+                          Event {idx + 1}: {evt.event || '(not selected)'}
+                        </label>
+                        <select
+                          value={evt.condition}
+                          onChange={(e) => updateEventMarker(idx, 'condition', e.target.value)}
+                          className="condition-select"
+                        >
+                          <option value="all">All conditions</option>
+                          {availableConditions.map(condition => (
+                            <option key={condition} value={condition}>{condition}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {wizardStep === 4 && (
+                <div className="wizard-section">
+                  <h3 className="wizard-section-title">Analysis Method</h3>
+                  <p className="wizard-section-description">
+                    Choose the statistical method for your analysis.
+                  </p>
+
+                  <div className="method-grid">
+                    <label className="method-option">
+                      <input
+                        type="radio"
+                        name="analysisMethod"
+                        value="raw"
+                        checked={selectedAnalysisMethod === 'raw'}
+                        onChange={(e) => setSelectedAnalysisMethod(e.target.value)}
+                      />
+                      <div className="method-content">
+                        <strong>Raw Data</strong>
+                        <span>Direct signal values</span>
+                      </div>
+                    </label>
+
+                    <label className="method-option">
+                      <input
+                        type="radio"
+                        name="analysisMethod"
+                        value="mean"
+                        checked={selectedAnalysisMethod === 'mean'}
+                        onChange={(e) => setSelectedAnalysisMethod(e.target.value)}
+                      />
+                      <div className="method-content">
+                        <strong>Mean</strong>
+                        <span>Average value</span>
+                      </div>
+                    </label>
+
+                    <label className="method-option">
+                      <input
+                        type="radio"
+                        name="analysisMethod"
+                        value="moving_average"
+                        checked={selectedAnalysisMethod === 'moving_average'}
+                        onChange={(e) => setSelectedAnalysisMethod(e.target.value)}
+                      />
+                      <div className="method-content">
+                        <strong>Moving Average</strong>
+                        <span>Smoothed signal</span>
+                      </div>
+                    </label>
+
+                    <label className="method-option">
+                      <input
+                        type="radio"
+                        name="analysisMethod"
+                        value="rmssd"
+                        checked={selectedAnalysisMethod === 'rmssd'}
+                        onChange={(e) => setSelectedAnalysisMethod(e.target.value)}
+                      />
+                      <div className="method-content">
+                        <strong>RMSSD</strong>
+                        <span>Root mean square of successive differences</span>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {wizardStep === 5 && (
+                <div className="wizard-section">
+                  <h3 className="wizard-section-title">Plot Type</h3>
+                  <p className="wizard-section-description">
+                    Select how you want to visualize your data.
+                  </p>
+
+                  <div className="plot-grid">
+                    <label className="plot-option">
+                      <input
+                        type="radio"
+                        name="plotType"
+                        value="lineplot"
+                        checked={selectedPlotType === 'lineplot'}
+                        onChange={(e) => setSelectedPlotType(e.target.value)}
+                      />
+                      <div className="plot-content">
+                        <strong>Line Plot</strong>
+                        <span>Time series visualization</span>
+                      </div>
+                    </label>
+
+                    <label className="plot-option">
+                      <input
+                        type="radio"
+                        name="plotType"
+                        value="boxplot"
+                        checked={selectedPlotType === 'boxplot'}
+                        onChange={(e) => setSelectedPlotType(e.target.value)}
+                      />
+                      <div className="plot-content">
+                        <strong>Box Plot</strong>
+                        <span>Distribution summary</span>
+                      </div>
+                    </label>
+
+                    <label className="plot-option">
+                      <input
+                        type="radio"
+                        name="plotType"
+                        value="poincare"
+                        checked={selectedPlotType === 'poincare'}
+                        onChange={(e) => setSelectedPlotType(e.target.value)}
+                      />
+                      <div className="plot-content">
+                        <strong>Poincaré Plot</strong>
+                        <span>HRV analysis</span>
+                      </div>
+                    </label>
+
+                    <label className="plot-option">
+                      <input
+                        type="radio"
+                        name="plotType"
+                        value="scatter"
+                        checked={selectedPlotType === 'scatter'}
+                        onChange={(e) => setSelectedPlotType(e.target.value)}
+                      />
+                      <div className="plot-content">
+                        <strong>Scatter Plot</strong>
+                        <span>Point distribution</span>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {wizardStep === 6 && (
+                <div className="wizard-section">
+                  <h3 className="wizard-section-title">Configuration Review</h3>
+                  <p className="wizard-section-description">
+                    Review your analysis configuration before running.
+                  </p>
+
+                  <div className="config-summary">
+                    <div className="summary-item">
+                      <strong>Analysis Type:</strong> {analysisType === 'inter' ? 'Inter-Subject (Single)' : 'Intra-Subject (Multi)'}
+                    </div>
+                    <div className="summary-item">
+                      <strong>Subjects:</strong> {getSelectedSubjectsCount()} selected
+                    </div>
+                    <div className="summary-item">
+                      <strong>Biometric Tags:</strong> {Object.values(selectedMetrics).filter(Boolean).length} selected
+                    </div>
+                    <div className="summary-item">
+                      <strong>Event Windows:</strong> {selectedEvents.filter(e => e.event).length} configured
+                    </div>
+                    <div className="summary-item">
+                      <strong>Analysis Method:</strong> {selectedAnalysisMethod}
+                    </div>
+                    <div className="summary-item">
+                      <strong>Plot Type:</strong> {selectedPlotType}
+                    </div>
+                  </div>
+
+                  {configIssues.length > 0 && (
+                    <div className="config-issues">
+                      <h4 className="issues-title">⚠️ Configuration Issues:</h4>
+                      <ul className="issues-list">
+                        {configIssues.map((issue, idx) => (
+                          <li key={idx}>{issue}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {configIssues.length === 0 && (
+                    <div className="config-ready">
+                      ✅ Configuration looks good! Ready to run analysis.
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {wizardStep === 7 && (
+                <div className="wizard-section wizard-final">
+                  <h3 className="wizard-section-title">Run Analysis</h3>
+                  <p className="wizard-section-description">
+                    Click the button below to start processing your data. This may take a few moments.
+                  </p>
+
+                  <button
+                    onClick={uploadAndAnalyze}
+                    disabled={configIssues.length > 0 || isAnalyzing}
+                    className="run-analysis-btn"
+                  >
+                    {isAnalyzing ? '⏳ Analyzing...' : '🚀 Run Analysis'}
+                  </button>
+
+                  {configIssues.length > 0 && (
+                    <div className="final-warning">
+                      Please resolve configuration issues before running analysis.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="wizard-footer">
+              <button
+                onClick={prevWizardStep}
+                disabled={wizardStep === 0}
+                className="wizard-nav-btn prev"
+              >
+                ← Previous
+              </button>
+
+              <div className="wizard-progress">
+                Step {wizardStep + 1} of 8
+              </div>
+
+              <button
+                onClick={nextWizardStep}
+                disabled={wizardStep === 7}
+                className="wizard-nav-btn next"
+              >
+                Next →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isAnalyzing && (
         <div className="processing-overlay">
           <div className="spinner-container">
@@ -1224,15 +1335,13 @@ function AnalysisViewer() {
         </div>
       )}
 
-      {/* Instruction Wizard */}
-      {showWizard ? (
+      {showWizard && !showConfigWizard && (
         <div className="instruction-wizard">
           <div className="wizard-header">
             <h3 className="wizard-title">User Guide</h3>
             <button 
               className="wizard-close-btn"
               onClick={() => setShowWizard(false)}
-              aria-label="Close wizard"
             >
               ×
             </button>
@@ -1283,11 +1392,12 @@ function AnalysisViewer() {
             </button>
           </div>
         </div>
-      ) : (
+      )}
+
+      {!showWizard && !showConfigWizard && (
         <button
           className="wizard-toggle-btn"
           onClick={() => setShowWizard(true)}
-          aria-label="Open instruction wizard"
         />
       )}
     </div>
