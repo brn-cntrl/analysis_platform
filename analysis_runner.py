@@ -1,8 +1,3 @@
-"""
-Main analysis runner module - replaces Jupyter notebook execution.
-Handles the complete analysis pipeline for EmotiBit data.
-"""
-
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -19,17 +14,36 @@ from analysis_utils import (
     extract_window_data
 )
 
+# Import new modules
+from analysis_methods import (
+    apply_analysis_method,
+    calculate_statistics,
+    get_method_label
+)
 
-def run_analysis(subject_folder, manifest, selected_metrics, comparison_groups, analyze_hrv=False, output_folder='data/outputs'):
+from plot_generator import (
+    generate_plot,
+    generate_comparison_plot
+)
+
+
+def run_analysis(subject_folder, manifest, selected_metrics, comparison_groups, 
+                 analysis_method='raw', plot_type='lineplot', analyze_hrv=False, 
+                 output_folder='data/outputs', batch_mode=False, selected_subjects=None):
     """
-    Main entry point for analysis - replaces notebook execution.
+    Main entry point for analysis.
     
     Args:
         subject_folder: Path to subject data folder
         manifest: File manifest dict with paths to data files
         selected_metrics: List of metric names to analyze
         comparison_groups: List of comparison group configurations
+        analysis_method: Analysis method ('raw', 'mean', 'moving_average', 'rmssd')
+        plot_type: Visualization type ('lineplot', 'boxplot', 'scatter', 'poincare')
+        analyze_hrv: Whether to perform HRV analysis
         output_folder: Where to save plots
+        batch_mode: Whether analyzing multiple subjects
+        selected_subjects: List of subject names (if batch_mode)
         
     Returns:
         results: Dict containing analysis results, plots, and status
@@ -44,23 +58,36 @@ def run_analysis(subject_folder, manifest, selected_metrics, comparison_groups, 
         'markers': {},
         'analysis': {},
         'plots': [],
-        'hrv': None
+        'hrv': None,
+        'config': {
+            'analysis_method': analysis_method,
+            'plot_type': plot_type,
+            'batch_mode': batch_mode,
+            'selected_subjects': selected_subjects or []
+        }
     }
     
-    print("\n1. LOADING CONFIGURATION")
-    print("-" * 80)
-    print(f"Using subject folder: {os.path.basename(subject_folder)}")
-    print(f"  EmotiBit files: {len(manifest.get('emotibit_files', []))}")
-    print(f"  Event markers: {'Yes' if manifest.get('event_markers') else 'No'}")
-    print(f"  Selected metrics: {selected_metrics}")
-    print(f"  Comparison groups: {len(comparison_groups)}")
+    print("\n" + "="*80)
+    print("STARTING ANALYSIS")
+    print("="*80)
+    print(f"Subject folder: {os.path.basename(subject_folder)}")
+    print(f"EmotiBit files: {len(manifest.get('emotibit_files', []))}")
+    print(f"Event markers: {'Yes' if manifest.get('event_markers') else 'No'}")
+    print(f"Selected metrics: {selected_metrics}")
+    print(f"Comparison groups: {len(comparison_groups)}")
+    print(f"Analysis method: {analysis_method}")
+    print(f"Plot type: {plot_type}")
+    print(f"Batch mode: {batch_mode}")
+    if batch_mode and selected_subjects:
+        print(f"Selected subjects: {selected_subjects}")
+    print("="*80 + "\n")
     
     if len(comparison_groups) < 1:
         results['warnings'].append('Need at least 1 comparison group')
-        print("  ⚠ Warning: Need at least 1 comparison group")
+        print("⚠ Warning: Need at least 1 comparison group\n")
     
     # Load event markers
-    print("\n2. LOADING EVENT MARKERS")
+    print("1. LOADING EVENT MARKERS")
     print("-" * 80)
     
     try:
@@ -91,9 +118,11 @@ def run_analysis(subject_folder, manifest, selected_metrics, comparison_groups, 
         results['errors'].append(error_msg)
         df_markers = None
     
+    print()
+    
     # Analyze HRV if requested
     if analyze_hrv and df_markers is not None:
-        print("\n3. ANALYZING HRV")
+        print("2. ANALYZING HRV")
         print("-" * 80)
         
         try:
@@ -107,19 +136,25 @@ def run_analysis(subject_folder, manifest, selected_metrics, comparison_groups, 
             if hrv_results:
                 results['hrv'] = hrv_results
                 results['plots'].extend(hrv_plots)
+            print()
         except Exception as e:
             error_msg = f"Error analyzing HRV: {str(e)}"
-            print(f"  ERROR: {error_msg}")
+            print(f"ERROR: {error_msg}")
             results['errors'].append(error_msg)
             import traceback
             traceback.print_exc()
+            print()
 
     # Analyze selected metrics
     if df_markers is not None and selected_metrics:
-        print("\n3. ANALYZING SELECTED METRICS")
+        print(f"3. ANALYZING SELECTED METRICS (Method: {get_method_label(analysis_method)})")
         print("-" * 80)
         
         for metric in selected_metrics:
+            if metric == 'HRV':
+                # HRV is handled separately above
+                continue
+                
             print(f"\nAnalyzing metric: {metric}")
             print("-" * 40)
             
@@ -131,14 +166,16 @@ def run_analysis(subject_folder, manifest, selected_metrics, comparison_groups, 
                         break
                 
                 if not metric_file:
-                    print(f"  ⚠ Warning: File for metric {metric} not found - skipping")
+                    print(f"⚠ Warning: File for metric {metric} not found - skipping")
                     continue
                 
                 metric_results, metric_plots = analyze_metric(
                     metric_file, 
                     df_markers, 
                     comparison_groups, 
-                    metric, 
+                    metric,
+                    analysis_method,
+                    plot_type,
                     output_folder
                 )
                 
@@ -148,15 +185,17 @@ def run_analysis(subject_folder, manifest, selected_metrics, comparison_groups, 
                 
             except Exception as e:
                 error_msg = f"Error analyzing {metric}: {str(e)}"
-                print(f"  ERROR: {error_msg}")
+                print(f"ERROR: {error_msg}")
                 results['errors'].append(error_msg)
                 import traceback
                 traceback.print_exc()
+        
+        print()
     else:
-        print("\n⚠ Skipping analysis - no event markers or metrics selected")
+        print("⚠ Skipping analysis - no event markers or metrics selected\n")
     
     # Finalize results
-    print("\n4. FINALIZING RESULTS")
+    print("4. FINALIZING RESULTS")
     print("-" * 80)
     
     results['status'] = 'completed' if len(results['errors']) == 0 else 'completed_with_errors'
@@ -172,20 +211,23 @@ def run_analysis(subject_folder, manifest, selected_metrics, comparison_groups, 
     
     print("\n" + "="*80)
     print("ANALYSIS COMPLETE")
-    print("="*80)
+    print("="*80 + "\n")
     
     return results
 
 
-def analyze_metric(metric_file, df_markers, comparison_groups, metric, output_folder):
+def analyze_metric(metric_file, df_markers, comparison_groups, metric, 
+                   analysis_method, plot_type, output_folder):
     """
-    Analyze a single metric and generate plots.
+    Analyze a single metric with specified method and generate plots.
     
     Args:
         metric_file: Path to metric CSV file
         df_markers: DataFrame with event markers
         comparison_groups: List of comparison group configs
         metric: Metric name (e.g., 'HR', 'EDA')
+        analysis_method: Analysis method to apply
+        plot_type: Type of plot to generate
         output_folder: Where to save plots
         
     Returns:
@@ -199,7 +241,7 @@ def analyze_metric(metric_file, df_markers, comparison_groups, metric, output_fo
     offset = find_timestamp_offset(df_markers, df_metric)
     
     # Extract data for each comparison group
-    group_data = {}
+    group_data_raw = {}
     
     for group in comparison_groups:
         group_label = group['label']
@@ -211,241 +253,78 @@ def analyze_metric(metric_file, df_markers, comparison_groups, metric, output_fo
             print(f"  ⚠ Warning: No data for group '{group_label}' - skipping")
             continue
         
-        group_data[group_label] = data
+        group_data_raw[group_label] = data
     
-    if len(group_data) < 1:
+    if len(group_data_raw) < 1:
         print(f"  ⚠ Warning: No groups with data - skipping {metric}")
         return None, []
     
-    # Calculate statistics
+    # Apply analysis method to each group
+    print(f"\n  Applying analysis method: {get_method_label(analysis_method)}")
+    
     metric_col = df_metric.columns[-1]
+    group_data_processed = {}
+    
+    for group_label, data in group_data_raw.items():
+        try:
+            processed_data = apply_analysis_method(data, metric_col, analysis_method)
+            group_data_processed[group_label] = processed_data
+            print(f"    ✓ Processed '{group_label}': {len(processed_data)} data points")
+        except Exception as e:
+            print(f"    ⚠ Error processing '{group_label}': {e}")
+            continue
+    
+    if len(group_data_processed) == 0:
+        print(f"  ⚠ Warning: No successfully processed groups - skipping {metric}")
+        return None, []
+    
+    # Calculate statistics
+    print(f"\n  Calculating statistics...")
     metric_results = {}
     
-    for group_label, data in group_data.items():
-        values = data[metric_col].dropna()
-        
-        stats = {
-            'mean': float(values.mean()),
-            'std': float(values.std()),
-            'min': float(values.min()),
-            'max': float(values.max()),
-            'count': int(len(values))
-        }
-        
+    for group_label, data in group_data_processed.items():
+        stats = calculate_statistics(data, metric_col, analysis_method)
         metric_results[group_label] = stats
-        print(f"\n  {group_label}: mean={stats['mean']:.2f}, std={stats['std']:.2f}, n={stats['count']}")
+        
+        print(f"    {group_label}: mean={stats['mean']:.2f}, std={stats['std']:.2f}, n={stats['count']}")
     
     # Generate plots
-    print(f"\n  Creating visualizations...")
+    print(f"\n  Creating visualizations (Plot type: {plot_type})...")
     plots = []
     
-    # Plot 1: Individual time series
-    plot1 = generate_individual_timeseries_plot(group_data, metric_col, metric, output_folder)
+    # Main plot based on selected type
+    plot1 = generate_plot(
+        group_data_processed, 
+        metric_col, 
+        metric, 
+        plot_type,
+        analysis_method,
+        output_folder
+    )
     if plot1:
         plots.append(plot1)
     
-    # Plots 2 and 3: Only if multiple groups
-    if len(group_data) >= 2:
-        plot2 = generate_chronological_timeseries_plot(group_data, metric_col, metric, output_folder)
+    # Comparison plot (if multiple groups)
+    if len(group_data_processed) >= 2:
+        plot2 = generate_comparison_plot(
+            metric_results, 
+            metric, 
+            analysis_method,
+            output_folder
+        )
         if plot2:
             plots.append(plot2)
-        
-        plot3 = generate_comparison_plot(metric_results, metric, output_folder)
-        if plot3:
-            plots.append(plot3)
     else:
-        print(f"  ⚠ Skipping comparison plots - single group analysis")
+        print(f"    ⚠ Skipping comparison plot - single group analysis")
     
     return metric_results, plots
 
 
-def generate_individual_timeseries_plot(group_data, metric_col, metric, output_folder):
-    """Generate individual time series plot for each comparison group."""
-    colors = ['#4CAF50', '#2196F3', '#FF9800', '#9C27B0', '#F44336', 
-              '#00BCD4', '#FFEB3B', '#795548', '#607D8B', '#E91E63']
-    
-    num_groups = len(group_data)
-    fig, axes = plt.subplots(num_groups, 1, figsize=(14, 4 * num_groups), squeeze=False)
-    
-    for idx, (group_label, data) in enumerate(group_data.items()):
-        ax = axes[idx, 0]
-        values = data[metric_col].dropna()
-        
-        timestamps = data['AdjustedTimestamp'].values
-        start_time = timestamps.min()
-        elapsed_seconds = timestamps - start_time
-        
-        color = colors[idx % len(colors)]
-        
-        ax.plot(elapsed_seconds, values, color=color, linewidth=1.5, alpha=0.8)
-        ax.scatter(elapsed_seconds, values, color=color, s=12, alpha=0.6)
-        
-        mean_val = values.mean()
-        ax.axhline(y=mean_val, color='red', linestyle='--', alpha=0.5, 
-                label=f'Mean: {mean_val:.2f}')
-        
-        stats_text = f'Mean: {values.mean():.2f}\nStd: {values.std():.2f}\nn: {len(values)}'
-        ax.text(0.98, 0.97, stats_text, transform=ax.transAxes,
-            verticalalignment='top', horizontalalignment='right',
-            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
-            fontsize=9, family='monospace')
-        
-        ax.set_xlabel('Elapsed Time (seconds)', fontsize=11)
-        ax.set_ylabel(f'{metric} Value', fontsize=11)
-        ax.set_title(f'{group_label}', fontsize=12, fontweight='bold', color=color)
-        ax.grid(True, alpha=0.3, linestyle='--')
-        ax.legend(loc='upper left', fontsize=9)
-    
-    plt.tight_layout()
-    plot_path = os.path.join(output_folder, f'{metric}_individual_timeseries.png')
-    plt.savefig(plot_path, dpi=100, bbox_inches='tight')
-    plt.close()
-    
-    print(f"    ✓ Saved: {metric}_individual_timeseries.png")
-    
-    return {
-        'name': f'{metric} Individual Time Series',
-        'path': plot_path,
-        'filename': f'{metric}_individual_timeseries.png',
-        'url': f'/api/plot/{metric}_individual_timeseries.png'
-    }
-
-
-def generate_chronological_timeseries_plot(group_data, metric_col, metric, output_folder):
-    """Generate chronological time series plot showing all groups."""
-    colors = ['#4CAF50', '#2196F3', '#FF9800', '#9C27B0', '#F44336', 
-              '#00BCD4', '#FFEB3B', '#795548', '#607D8B', '#E91E63']
-    
-    fig, ax = plt.subplots(figsize=(16, 6))
-    
-    all_time_series_data = []
-    
-    for group_label, data in group_data.items():
-        values = data[metric_col].dropna()
-        timestamps = data['AdjustedTimestamp'].values
-        
-        for ts, val in zip(timestamps, values):
-            all_time_series_data.append({
-                'timestamp': ts,
-                'value': val,
-                'group': group_label
-            })
-    
-    ts_df = pd.DataFrame(all_time_series_data)
-    ts_df = ts_df.sort_values('timestamp').reset_index(drop=True)
-    
-    start_time = ts_df['timestamp'].min()
-    ts_df['elapsed_minutes'] = (ts_df['timestamp'] - start_time) / 60
-    
-    group_labels = list(group_data.keys())
-    
-    for idx, group_label in enumerate(group_labels):
-        group_segment = ts_df[ts_df['group'] == group_label]
-        if len(group_segment) > 0:
-            color = colors[idx % len(colors)]
-            ax.plot(group_segment['elapsed_minutes'], group_segment['value'],
-                color=color, linewidth=1.5, alpha=0.8, label=group_label)
-            ax.scatter(group_segment['elapsed_minutes'], group_segment['value'],
-                    color=color, s=8, alpha=0.6)
-    
-    # Add event boundaries
-    event_boundaries = []
-    for group_label in group_labels:
-        group_segment = ts_df[ts_df['group'] == group_label]
-        if len(group_segment) > 0:
-            start_min = group_segment['elapsed_minutes'].min()
-            end_min = group_segment['elapsed_minutes'].max()
-            event_boundaries.append((group_label, start_min, end_min))
-    
-    y_min, y_max = ax.get_ylim()
-    for group_label, start_min, end_min in event_boundaries:
-        ax.axvline(x=start_min, color='black', linestyle='--', alpha=0.3, linewidth=1)
-        ax.axvline(x=end_min, color='black', linestyle='--', alpha=0.3, linewidth=1)
-        
-        mid_min = (start_min + end_min) / 2
-        ax.text(mid_min, y_max * 0.97, group_label, 
-            ha='center', va='top', fontweight='bold', fontsize=10,
-            bbox=dict(boxstyle="round,pad=0.4", facecolor="white", alpha=0.9, edgecolor='gray'))
-    
-    # Set x-axis ticks
-    max_minutes = ts_df['elapsed_minutes'].max()
-    if max_minutes <= 5:
-        tick_interval = 0.5
-    elif max_minutes <= 15:
-        tick_interval = 1
-    elif max_minutes <= 60:
-        tick_interval = 2
-    else:
-        tick_interval = 5
-    
-    tick_positions = np.arange(0, max_minutes + tick_interval, tick_interval)
-    ax.set_xticks(tick_positions)
-    ax.set_xticklabels([f'{t:.1f}' if t % 1 != 0 else str(int(t)) for t in tick_positions])
-    
-    ax.set_xlabel('Elapsed Time (minutes)', fontsize=12)
-    ax.set_ylabel(f'{metric} Value', fontsize=12)
-    ax.set_title(f'{metric} Time Series: Chronological Progression', fontsize=14, fontweight='bold')
-    ax.legend(fontsize=10, loc='best')
-    ax.grid(True, alpha=0.3, linestyle='--')
-    plt.tight_layout()
-    
-    plot_path = os.path.join(output_folder, f'{metric}_timeseries.png')
-    plt.savefig(plot_path, dpi=100, bbox_inches='tight')
-    plt.close()
-    
-    print(f"    ✓ Saved: {metric}_timeseries.png")
-    
-    return {
-        'name': f'{metric} Time Series',
-        'path': plot_path,
-        'filename': f'{metric}_timeseries.png',
-        'url': f'/api/plot/{metric}_timeseries.png'
-    }
-
-
-def generate_comparison_plot(metric_results, metric, output_folder):
-    """Generate comparison bar chart with statistics."""
-    colors = ['#4CAF50', '#2196F3', '#FF9800', '#9C27B0', '#F44336', 
-              '#00BCD4', '#FFEB3B', '#795548', '#607D8B', '#E91E63']
-    
-    fig, ax = plt.subplots(figsize=(max(10, len(metric_results) * 2), 6))
-    
-    group_labels = list(metric_results.keys())
-    means = [metric_results[label]['mean'] for label in group_labels]
-    stds = [metric_results[label]['std'] for label in group_labels]
-    
-    x_pos = np.arange(len(group_labels))
-    bars = ax.bar(x_pos, means, yerr=stds, capsize=10, 
-                color=[colors[i % len(colors)] for i in range(len(group_labels))], 
-                alpha=0.7, edgecolor='black', linewidth=1.5)
-    
-    ax.set_xticks(x_pos)
-    ax.set_xticklabels(group_labels, rotation=45, ha='right')
-    ax.set_ylabel(f'{metric} Value', fontsize=12)
-    ax.set_title(f'{metric}: Statistical Comparison', fontsize=14, fontweight='bold')
-    ax.grid(True, alpha=0.3, axis='y', linestyle='--')
-    
-    # Add value labels on bars
-    for i, (mean, std) in enumerate(zip(means, stds)):
-        ax.text(i, mean + std + 0.05 * max(means), f'{mean:.2f}±{std:.2f}',
-            ha='center', va='bottom', fontsize=9, fontweight='bold')
-    
-    plt.tight_layout()
-    plot_path = os.path.join(output_folder, f'{metric}_comparison.png')
-    plt.savefig(plot_path, dpi=100, bbox_inches='tight')
-    plt.close()
-    
-    print(f"    ✓ Saved: {metric}_comparison.png")
-    
-    return {
-        'name': f'{metric} Statistical Comparison',
-        'path': plot_path,
-        'filename': f'{metric}_comparison.png',
-        'url': f'/api/plot/{metric}_comparison.png'
-    }
-
 def analyze_hrv_from_ppg(manifest, df_markers, comparison_groups, output_folder):
-    """Analyze HRV from PPG signals."""
+    """
+    Analyze HRV from PPG signals.
+    [PRESERVED - No changes to this function]
+    """
     print("  Loading PPG data files...")
     
     # Find PI file (required)
@@ -507,17 +386,17 @@ def analyze_hrv_from_ppg(manifest, df_markers, comparison_groups, output_folder)
 
 
 def generate_hrv_plot(data, param, plot_type, output_folder):
-    """Generate HRV plots with proper spacing to prevent overlapping."""
+    """
+    Generate HRV plots with proper spacing.
+    [PRESERVED - No changes to this function]
+    """
     try:
         if plot_type == 'signal':
             signals, info = data, param
-            # Let NeuroKit2 create its own figure
             nk.ppg_plot(signals, info)
-            # NOW get the figure it created and resize it
             fig = plt.gcf()
-            fig.set_size_inches(20, 22)  # Make it much taller
+            fig.set_size_inches(20, 22)
             fig.suptitle('PPG Signal with Detected Peaks', fontsize=24, fontweight='bold', y=0.995)
-            # Increase tick label font sizes for all axes
             for ax in fig.get_axes():
                 ax.tick_params(axis='both', which='major', labelsize=12)
                 ax.xaxis.label.set_fontsize(16)
@@ -526,19 +405,15 @@ def generate_hrv_plot(data, param, plot_type, output_folder):
                 if legend:
                     for text in legend.get_texts():
                         text.set_fontsize(16)
-
             filename = 'HRV_ppg_signal.png'
             name = 'HRV - PPG Signal with Peaks'
             
         elif plot_type == 'time':
             peaks, sampling_rate = data, param
-            # Let NeuroKit2 create the plot, then get and resize
             nk.hrv_time(peaks, sampling_rate=sampling_rate, show=True)
             fig = plt.gcf()
             fig.set_size_inches(20, 20)
             fig.suptitle('Time Domain HRV', fontsize=24, fontweight='bold', y=0.995)
-            
-            # Increase tick label font sizes
             for ax in fig.get_axes():
                 ax.tick_params(axis='both', which='major', labelsize=18)
                 ax.xaxis.label.set_fontsize(16)
@@ -547,19 +422,15 @@ def generate_hrv_plot(data, param, plot_type, output_folder):
                 if legend:
                     for text in legend.get_texts():
                         text.set_fontsize(16)
-
             filename = 'HRV_time_domain.png'
             name = 'HRV - Time Domain'
             
         elif plot_type == 'frequency':
             peaks, sampling_rate = data, param
-            # Let NeuroKit2 create the plot, then get and resize
             nk.hrv_frequency(peaks, sampling_rate=sampling_rate, show=True)
             fig = plt.gcf()
             fig.set_size_inches(20, 18)
             fig.suptitle('Frequency Domain HRV', fontsize=24, fontweight='bold', y=0.995)
-            
-            # Increase tick label font sizes
             for ax in fig.get_axes():
                 ax.tick_params(axis='both', which='major', labelsize=18)
                 ax.xaxis.label.set_fontsize(16)
@@ -568,19 +439,15 @@ def generate_hrv_plot(data, param, plot_type, output_folder):
                 if legend:
                     for text in legend.get_texts():
                         text.set_fontsize(16)
-
             filename = 'HRV_frequency_domain.png'
             name = 'HRV - Frequency Domain'
             
         elif plot_type == 'nonlinear':
             peaks, sampling_rate = data, param
-            # Let NeuroKit2 create the plot, then get and resize
             nk.hrv_nonlinear(peaks, sampling_rate=sampling_rate, show=True)
             fig = plt.gcf()
             fig.set_size_inches(22, 20)
             fig.suptitle('Non-linear HRV', fontsize=24, fontweight='bold', y=0.995)
-            
-            # Increase tick label font sizes
             for ax in fig.get_axes():
                 ax.tick_params(axis='both', which='major', labelsize=18)
                 ax.xaxis.label.set_fontsize(16)
@@ -589,11 +456,9 @@ def generate_hrv_plot(data, param, plot_type, output_folder):
                 if legend:
                     for text in legend.get_texts():
                         text.set_fontsize(16)
-
             filename = 'HRV_nonlinear.png'
             name = 'HRV - Non-linear'
         
-        # Save the properly-sized figure
         plot_path = os.path.join(output_folder, filename)
         plt.savefig(plot_path, dpi=100, bbox_inches='tight', pad_inches=0.5)
         plt.close(fig)

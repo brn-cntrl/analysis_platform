@@ -112,26 +112,82 @@ def register():
 @app.route('/api/upload-folder-and-analyze', methods=['POST'])
 def upload_folder_and_analyze():
     """
-    Handles the upload of multiple files and folders, organizes them into a structured directory,
-    generates a manifest of uploaded files, and triggers analysis by calling the analysis_runner module.
-    
-    Workflow:
-    - Validates the presence of uploaded files in the request.
-    - Extracts file objects, their relative paths, folder name, selected metrics, and comparison groups from the request.
-    - Organizes files into a subject-specific folder, preserving their relative paths.
-    - Categorizes files into emotibit data, respiration data, event markers, SER/transcription files, and others.
-    - Generates a manifest JSON file describing the uploaded files and analysis configuration.
-    - Runs analysis directly via analysis_runner.run_analysis() instead of notebook subprocess.
-    - Returns analysis results and manifest as a JSON response, or appropriate error messages.
-    
-    Returns:
-        Response: JSON response containing analysis results, manifest, and status message,
-                  or error details with appropriate HTTP status code.
+    Handle a multipart/form-data POST that uploads a subject (or batch of subjects) folder,
+    organizes the uploaded files into a standardized manifest, and runs analysis on the
+    organized data.
+    This route expects a multipart/form-data request (typically from a browser or frontend
+    uploader) containing one or more files and a set of form fields describing how to run
+    the analysis. The function:
+    - Validates that files were uploaded.
+    - Extracts parameters from request.form and request.files.
+    - Saves uploaded files into a subject-specific folder under app.config['UPLOAD_FOLDER'].
+    - Builds a file_manifest describing categorized files (emotibit, respiration, event markers,
+        SER/transcription, and other files).
+    - Transforms frontend event selection into "comparison_groups" used by the analysis.
+    - Persists file_manifest to disk (file_manifest.json).
+    - Invokes run_analysis(...) with the assembled parameters.
+    - Persists analysis results to OUTPUT_FOLDER/results.json and augments plot entries with
+        URLs (/api/plot/<filename>).
+    - Returns a JSON response containing the results or an error message.
+    Expected HTTP form fields (all values are strings as sent by form/data inputs):
+    - files: uploaded file parts (multipart file list). Required.
+    - paths: list of path strings matching each uploaded file's relative path inside the
+        subject folder (must align 1:1 with files list). Each path helps recreate the folder
+        structure when saving files on the server.
+    - student_id: (optional) string to namespace uploads per student. Defaults to 'unknown'.
+    - folder_name: (optional) subfolder name under the student's folder. Defaults to 'subject_data'.
+    - selected_metrics: JSON-encoded array of metric identifiers (e.g. '["eda", "hr", ...]').
+    - selected_events: JSON-encoded array of event selector objects, each expected to be:
+            { "event": "<event_marker>" , "condition": "<condition_marker_or_all>" }
+        Example: [{"event":"stimulus_onset","condition":"A"},{"event":"all","condition":"all"}]
+    - analysis_method: (optional) string denoting the analysis pipeline to use (default 'raw').
+    - plot_type: (optional) string indicating plot style (default 'lineplot').
+    - analyze_hrv: JSON-encoded boolean string ("true"/"false") indicating whether to run HRV.
+    - batch_mode: "true" or "false" as string. When "true", perform analysis across multiple
+        selected_subjects.
+    - selected_subjects: JSON-encoded list of subject identifiers (used only if batch_mode is true).
+    File categorization rules (when building file_manifest):
+    - If the provided path contains "emotibit_data" (case-insensitive), the file is added to
+        emotibit_files.
+    - If the path contains "respiration_data", the file is added to respiration_files.
+    - If the filename lowercased ends with "_event_markers.csv", it is recorded as event_markers.
+    - If the filename contains "ser" or "transcription" (case-insensitive), it is recorded as ser_file.
+    - All other allowed files are appended to other_files.
+    - Files are only saved and recorded if allowed_file(file.filename) returns True.
+    Comparison groups transformation:
+    - Each entry in selected_events is converted to a comparison_group dict:
+            {
+                'label': <human readable label>,
+                'eventMarker': <event marker string>,
+                'conditionMarker': <condition string or empty if 'all'>,
+                'timeWindowType': 'full',
+    - Special handling: event == 'all' -> label 'Entire Experiment'. condition == 'all'
+        -> conditionMarker set to empty string.
+    Output / side effects:
+    - Files are saved under: os.path.join(app.config['UPLOAD_FOLDER'], student_id, secure_filename(folder_name))
+    - A file_manifest.json is written into the subject folder describing the uploaded files and
+        analysis configuration.
+    - run_analysis(...) is invoked with the following keyword parameters:
+            subject_folder, manifest, selected_metrics, comparison_groups,
+            analysis_method, plot_type, analyze_hrv, output_folder, batch_mode, selected_subjects
+    - Results returned by run_analysis are saved to OUTPUT_FOLDER/results.json.
+    - Any plot entries in results['plots'] will be annotated with a URL of the form:
+        "/api/plot/<filename>"
+    Responses:
+    - 200: JSON body with message, results, and folder_name on successful analysis.
+    - 400: JSON error when required inputs are missing (e.g. no files uploaded or no files in upload).
+    - 500: JSON error with exception details on unexpected server-side failure.
+    Errors and exceptions:
+    - The route catches all exceptions raised during file handling or analysis, logs the traceback,
+        and returns a 500 response with the exception message.
+    - The function skips files that do not satisfy allowed_file(filename) and will proceed with
+        the remaining valid files.
     """
     
     if 'files' not in request.files:
         return jsonify({'error': 'No files uploaded'}), 400
     
+    # Extract form parameters
     student_id = request.form.get('student_id', 'unknown')
     folder_name = request.form.get('folder_name', 'subject_data')
     subject_folder = os.path.join(app.config['UPLOAD_FOLDER'], student_id, secure_filename(folder_name))
@@ -139,42 +195,72 @@ def upload_folder_and_analyze():
     files = request.files.getlist('files')
     paths = request.form.getlist('paths')
 
+    # Parse frontend parameters
     selected_metrics = json.loads(request.form.get('selected_metrics', '[]'))
-    comparison_groups = json.loads(request.form.get('comparison_groups', '[]'))
-    analyze_hrv = json.loads(request.form.get('analyze_hrv', 'false')) 
+    selected_events = json.loads(request.form.get('selected_events', '[]'))
+    analysis_method = request.form.get('analysis_method', 'raw')
+    plot_type = request.form.get('plot_type', 'lineplot')
+    analyze_hrv = json.loads(request.form.get('analyze_hrv', 'false'))
     
-    print(f"Analysis Configuration:")
-    print(f"  Selected Metrics: {selected_metrics}")
-    
+    # Multi-subject parameters
     batch_mode = request.form.get('batch_mode', 'false') == 'true'
     selected_subjects = []
     if batch_mode:
         selected_subjects = json.loads(request.form.get('selected_subjects', '[]'))
-        print(f"\n{'='*60}")
-        print(f"BATCH MODE DETECTED")
-        print(f"Selected subjects: {selected_subjects}")
-        print(f"Total subjects: {len(selected_subjects)}")
-        print(f"NOTE: Only processing FIRST subject: {selected_subjects[0] if selected_subjects else 'None'}")
-        print(f"{'='*60}\n")
-        
-        # For now, only keep first subject
-        if len(selected_subjects) > 0:
-            selected_subjects = [selected_subjects[0]]
     
-    if batch_mode and len(selected_subjects) > 1:
-        return jsonify({
-            'message': 'Batch mode acknowledged',
-            'batch_mode': True,
-            'selected_subjects': selected_subjects,
-            'subject_count': len(selected_subjects),
-            'note': 'Batch processing not yet implemented - this is a test response'
-        }), 200
+    print(f"\n{'='*80}")
+    print(f"ANALYSIS REQUEST RECEIVED")
+    print(f"{'='*80}")
+    print(f"Student ID: {student_id}")
+    print(f"Folder: {folder_name}")
+    print(f"Metrics: {selected_metrics}")
+    print(f"Events: {selected_events}")
+    print(f"Analysis Method: {analysis_method}")
+    print(f"Plot Type: {plot_type}")
+    print(f"Analyze HRV: {analyze_hrv}")
+    print(f"Batch Mode: {batch_mode}")
+    if batch_mode:
+        print(f"Selected Subjects: {selected_subjects}")
+    print(f"{'='*80}\n")
+    
+    # Transform selected_events to comparison_groups format
+    comparison_groups = []
+    for idx, event_config in enumerate(selected_events):
+        event_marker = event_config.get('event', '')
+        condition_marker = event_config.get('condition', 'all')
+        
+        if not event_marker or event_marker == '':
+            continue
+        
+        # Create label for this comparison group
+        if event_marker == 'all':
+            label = 'Entire Experiment'
+        else:
+            label = event_marker
+            if condition_marker and condition_marker != 'all':
+                label += f" ({condition_marker})"
+        
+        comparison_group = {
+            'label': label,
+            'eventMarker': event_marker,
+            'conditionMarker': condition_marker if condition_marker != 'all' else '',
+            'timeWindowType': 'full',  # Default to full window
+            'customStart': 0,
+            'customEnd': 0
+        }
+        
+        comparison_groups.append(comparison_group)
+    
+    print(f"Transformed comparison groups:")
+    for group in comparison_groups:
+        print(f"  - {group['label']}")
+    print()
     
     if not files or len(files) == 0:
         return jsonify({'error': 'No files in upload'}), 400
     
     try:
-        # os.makedirs(subject_folder, exist_ok=True)
+        # Organize files into manifest (existing code preserved)
         file_manifest = {
             'emotibit_files': [],
             'respiration_files': [],
@@ -191,8 +277,8 @@ def upload_folder_and_analyze():
             file_path = os.path.join(subject_folder, relative_path)
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             file.save(file_path)
+            
             filename_lower = file.filename.lower()
-            path_depth = len(path.split('/'))
             
             if 'emotibit_data' in path.lower():
                 file_manifest['emotibit_files'].append({
@@ -227,7 +313,11 @@ def upload_folder_and_analyze():
         
         file_manifest['analysis_config'] = {
             'selected_metrics': selected_metrics,
-            'comparison_groups': comparison_groups
+            'comparison_groups': comparison_groups,
+            'analysis_method': analysis_method,
+            'plot_type': plot_type,
+            'batch_mode': batch_mode,
+            'selected_subjects': selected_subjects
         }
         
         manifest_path = os.path.join(subject_folder, 'file_manifest.json')
@@ -238,23 +328,29 @@ def upload_folder_and_analyze():
         print(f"Event markers file: {file_manifest['event_markers']}")
         print("Running analysis...")
 
+        # Call analysis with all parameters
         results = run_analysis(
             subject_folder=subject_folder,
             manifest=file_manifest,
             selected_metrics=selected_metrics,
             comparison_groups=comparison_groups,
+            analysis_method=analysis_method,
+            plot_type=plot_type,
             analyze_hrv=analyze_hrv,
-            output_folder=OUTPUT_FOLDER
+            output_folder=OUTPUT_FOLDER,
+            batch_mode=batch_mode,
+            selected_subjects=selected_subjects
         )
         
         print("Analysis completed successfully")
         
+        # Update plot URLs
         for plot in results.get('plots', []):
             plot['url'] = f"/api/plot/{plot['filename']}"
         
         results['file_manifest'] = file_manifest
         
-        # Save results to JSON file (optional, for backward compatibility)
+        # Save results to JSON file
         results_path = os.path.join(OUTPUT_FOLDER, 'results.json')
         with open(results_path, 'w') as f:
             json.dump(results, f, indent=2)
@@ -271,7 +367,6 @@ def upload_folder_and_analyze():
         import traceback
         traceback.print_exc()
         return jsonify({'error': error_msg}), 500
-
 
 @app.route('/api/plot/<filename>', methods=['GET'])
 def serve_plot(filename):

@@ -38,7 +38,7 @@ function AnalysisViewer() {
   const [selectedAnalysisMethod, setSelectedAnalysisMethod] = useState('raw');
   const [selectedPlotType, setSelectedPlotType] = useState('lineplot');
   const [configIssues, setConfigIssues] = useState([]);
-  const [lastAnalysisStatus, setLastAnalysisStatus] = useState(null);
+  // const [lastAnalysisStatus, setLastAnalysisStatus] = useState(null);
 
   // Debug: Monitor when availableMetrics changes
   useEffect(() => {
@@ -494,38 +494,43 @@ function AnalysisViewer() {
     }
 
     const formData = new FormData();
-
     const filesToUpload = [];
     const pathsToUpload = [];
+    const addedFilePaths = new Set(); 
     
-    if (fileStructure.eventMarkersFile) {
-      filesToUpload.push(fileStructure.eventMarkersFile.file);
-      pathsToUpload.push(fileStructure.eventMarkersFile.path);
+    if (fileStructure.eventMarkersFiles && fileStructure.eventMarkersFiles.length > 0) {
+      fileStructure.eventMarkersFiles.forEach(emFile => {
+        if (!addedFilePaths.has(emFile.path)) {
+          filesToUpload.push(emFile.file);
+          pathsToUpload.push(emFile.path);
+          addedFilePaths.add(emFile.path);
+        }
+      });
     }
     
     selectedMetricsList.forEach(metric => {
       if (metric === 'HRV') {
+        // For HRV, add PPG files (PI, PR, PG)
         ['PI', 'PR', 'PG'].forEach(ppgType => {
           const ppgFile = fileStructure.emotibitFiles.find(f => 
             f.name.includes(`_${ppgType}.csv`)
           );
-          if (ppgFile && !filesToUpload.includes(ppgFile.file)) {
+          if (ppgFile && !addedFilePaths.has(ppgFile.path)) {
             filesToUpload.push(ppgFile.file);
             pathsToUpload.push(ppgFile.path);
+            addedFilePaths.add(ppgFile.path);
           }
         });
       } else {
+        // For other metrics, add the specific metric file
         const metricFile = fileStructure.emotibitFiles.find(f => 
           f.name.includes(`_${metric}.csv`)
         );
-        if (metricFile) {
+        if (metricFile && !addedFilePaths.has(metricFile.path)) {
           filesToUpload.push(metricFile.file);
           pathsToUpload.push(metricFile.path);
+          addedFilePaths.add(metricFile.path);
         }
-      }
-      if (fileStructure.eventMarkersFiles && fileStructure.eventMarkersFiles.length > 0) {
-        filesToUpload.push(fileStructure.eventMarkersFiles[0].file);
-        pathsToUpload.push(fileStructure.eventMarkersFiles[0].path);
       }
     });
 
@@ -570,14 +575,14 @@ function AnalysisViewer() {
         console.error('JSON parse error:', parseError);
         console.error('Response text:', responseText);
         setUploadStatus(`Error: Invalid JSON response from server. Check console for details.`);
-        setLastAnalysisStatus({ success: false, message: 'Invalid server response' });
+        // setLastAnalysisStatus({ success: false, message: 'Invalid server response' });
         return;
       }
       
       if (response.ok) {
         setUploadStatus('Analysis completed successfully!');
         setResults(data.results);
-        setLastAnalysisStatus({ success: true, message: 'Analysis completed successfully!' });
+        // setLastAnalysisStatus({ success: true, message: 'Analysis completed successfully!' });
 
         sessionStorage.setItem('analysisResults', JSON.stringify(data.results));
 
@@ -588,12 +593,12 @@ function AnalysisViewer() {
         }
       } else {
         setUploadStatus(`Error: ${data.error}`);
-        setLastAnalysisStatus({ success: false, message: data.error });
+        // setLastAnalysisStatus({ success: false, message: data.error });
       }
     } catch (error) {
       console.error('Fetch error:', error);
       setUploadStatus(`Error: ${error.message}`);
-      setLastAnalysisStatus({ success: false, message: error.message });
+      // setLastAnalysisStatus({ success: false, message: error.message });
     } finally {
       setIsAnalyzing(false);
     }
@@ -897,11 +902,11 @@ function AnalysisViewer() {
               </div>
             )}
 
-            {lastAnalysisStatus && (
+            {/* {lastAnalysisStatus && (
               <div className={`analysis-status ${lastAnalysisStatus.success ? 'success' : 'error'}`}>
                 {lastAnalysisStatus.success ? '✅' : '❌'} {lastAnalysisStatus.message}
               </div>
-            )}
+            )} */}
 
             {results && (
               <div className="results-redirect-section">
