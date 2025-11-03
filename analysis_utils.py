@@ -190,3 +190,68 @@ def extract_window_data(emotibit_df, event_markers_df, offset, window_config):
     print(f"  Extracted {len(combined_data)} data points across all occurrences")
     
     return combined_data
+
+def get_subject_files(manifest, subject_name):
+    """
+    Extract files specific to a subject from the manifest.
+    
+    Args:
+        manifest: File manifest dict
+        subject_name: Name of subject (e.g., 'subject_001')
+        
+    Returns:
+        Dict with subject-specific file lists:
+        {
+            'emotibit_files': [...],
+            'event_markers': {...},
+            'respiration_files': [...]
+        }
+    """
+    subject_files = {
+        'emotibit_files': [],
+        'event_markers': None,
+        'respiration_files': []
+    }
+    
+    # Filter emotibit files for this subject
+    for emotibit_file in manifest.get('emotibit_files', []):
+        if subject_name in emotibit_file['path']:
+            subject_files['emotibit_files'].append(emotibit_file)
+    
+    # Find event markers for this subject
+    # Check if manifest has single event_markers or multiple event_markers (batch)
+    if manifest.get('event_markers'):
+        # Single event markers file
+        if subject_name in manifest['event_markers']['path']:
+            subject_files['event_markers'] = manifest['event_markers']
+    
+    # If we have a list of event marker files (shouldn't happen with current route, but just in case)
+    if 'event_markers_files' in manifest:
+        for em_file in manifest['event_markers_files']:
+            if subject_name in em_file['path']:
+                subject_files['event_markers'] = em_file
+                break
+    
+    # Filter respiration files for this subject
+    for resp_file in manifest.get('respiration_files', []):
+        if subject_name in resp_file['path']:
+            subject_files['respiration_files'].append(resp_file)
+    
+    return subject_files
+
+
+def find_metric_file_for_subject(subject_files, metric):
+    """
+    Find the specific metric file for a subject.
+    
+    Args:
+        subject_files: Dict from get_subject_files()
+        metric: Metric name (e.g., 'HR', 'EDA')
+        
+    Returns:
+        File path string or None
+    """
+    for emotibit_file in subject_files.get('emotibit_files', []):
+        if f'_{metric}.csv' in emotibit_file['filename']:
+            return emotibit_file['path']
+    return None

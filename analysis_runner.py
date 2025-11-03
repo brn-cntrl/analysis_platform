@@ -11,7 +11,9 @@ import neurokit2 as nk
 from analysis_utils import (
     prepare_event_markers_timestamps,
     find_timestamp_offset,
-    extract_window_data
+    extract_window_data,
+    get_subject_files,           
+    find_metric_file_for_subject  
 )
 
 # Import new modules
@@ -27,14 +29,14 @@ from plot_generator import (
 )
 
 
-def run_analysis(subject_folder, manifest, selected_metrics, comparison_groups, 
+def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups, 
                  analysis_method='raw', plot_type='lineplot', analyze_hrv=False, 
                  output_folder='data/outputs', batch_mode=False, selected_subjects=None):
     """
     Main entry point for analysis.
     
     Args:
-        subject_folder: Path to subject data folder
+        upload_folder: Path to subject data folder
         manifest: File manifest dict with paths to data files
         selected_metrics: List of metric names to analyze
         comparison_groups: List of comparison group configurations
@@ -49,7 +51,6 @@ def run_analysis(subject_folder, manifest, selected_metrics, comparison_groups,
         results: Dict containing analysis results, plots, and status
     """
     os.makedirs(output_folder, exist_ok=True)
-    
     results = {
         'status': 'processing',
         'timestamp': datetime.now().isoformat(),
@@ -70,7 +71,7 @@ def run_analysis(subject_folder, manifest, selected_metrics, comparison_groups,
     print("\n" + "="*80)
     print("STARTING ANALYSIS")
     print("="*80)
-    print(f"Subject folder: {os.path.basename(subject_folder)}")
+    print(f"Subject folder: {os.path.basename(upload_folder)}")
     print(f"EmotiBit files: {len(manifest.get('emotibit_files', []))}")
     print(f"Event markers: {'Yes' if manifest.get('event_markers') else 'No'}")
     print(f"Selected metrics: {selected_metrics}")
@@ -159,29 +160,56 @@ def run_analysis(subject_folder, manifest, selected_metrics, comparison_groups,
             print("-" * 40)
             
             try:
-                metric_file = None
-                for emotibit_file in manifest['emotibit_files']:
-                    if f'_{metric}.csv' in emotibit_file['filename']:
-                        metric_file = emotibit_file['path']
-                        break
+                # ═══════════════════════════════════════════════════════════
+                # MULTI-SUBJECT BATCH MODE
+                # ═══════════════════════════════════════════════════════════
+                if batch_mode and selected_subjects and len(selected_subjects) > 1:
+                    print(f"  🔄 Multi-subject analysis: {len(selected_subjects)} subjects")
+                    
+                    metric_results, metric_plots = analyze_metric_multi_subject(
+                        manifest,
+                        selected_subjects,
+                        comparison_groups,
+                        metric,
+                        analysis_method,
+                        plot_type,
+                        output_folder
+                    )
+                    
+                    if metric_results:
+                        results['analysis'][metric] = metric_results
+                        results['plots'].extend(metric_plots)
                 
-                if not metric_file:
-                    print(f"⚠ Warning: File for metric {metric} not found - skipping")
-                    continue
-                
-                metric_results, metric_plots = analyze_metric(
-                    metric_file, 
-                    df_markers, 
-                    comparison_groups, 
-                    metric,
-                    analysis_method,
-                    plot_type,
-                    output_folder
-                )
-                
-                if metric_results:
-                    results['analysis'][metric] = metric_results
-                    results['plots'].extend(metric_plots)
+                # ═══════════════════════════════════════════════════════════
+                # SINGLE SUBJECT MODE (ORIGINAL LOGIC)
+                # ═══════════════════════════════════════════════════════════
+                else:
+                    print(f"  📊 Single subject analysis")
+                    
+                    metric_file = None
+                    for emotibit_file in manifest['emotibit_files']:
+                        if f'_{metric}.csv' in emotibit_file['filename']:
+                            metric_file = emotibit_file['path']
+                            break
+                    
+                    if not metric_file:
+                        print(f"  ⚠ Warning: File for metric {metric} not found - skipping")
+                        continue
+                    
+                    # Use original single-subject logic
+                    metric_results, metric_plots = analyze_metric(
+                        metric_file, 
+                        df_markers, 
+                        comparison_groups, 
+                        metric,
+                        analysis_method,
+                        plot_type,
+                        output_folder
+                    )
+                    
+                    if metric_results:
+                        results['analysis'][metric] = metric_results
+                        results['plots'].extend(metric_plots)
                 
             except Exception as e:
                 error_msg = f"Error analyzing {metric}: {str(e)}"
@@ -319,6 +347,150 @@ def analyze_metric(metric_file, df_markers, comparison_groups, metric,
     
     return metric_results, plots
 
+def analyze_metric_multi_subject(manifest, selected_subjects, comparison_groups, 
+                                  metric, analysis_method, plot_type, output_folder):
+    """
+    Analyze a metric across multiple subjects (intra-subject analysis).
+    Creates subject × event combinations for comparison.
+    
+    Args:
+        manifest: Full file manifest
+        selected_subjects: List of subject names
+        comparison_groups: List of event-based comparison groups
+        metric: Metric name (e.g., 'HR', 'EDA')
+        analysis_method: Analysis method to apply
+        plot_type: Type of plot to generate
+        output_folder: Where to save plots
+        
+    Returns:
+        Tuple of (metric_results dict, plots list)
+    """
+    print(f"  Loading data for {len(selected_subjects)} subjects...")
+    
+    # Data structure: {composite_label: DataFrame}
+    group_data_raw = {}
+    
+    # ═══════════════════════════════════════════════════════════════
+    # STEP 1: Load data for each subject × event combination
+    # ═══════════════════════════════════════════════════════════════
+    for subject in selected_subjects:
+        print(f"\n  Processing subject: {subject}")
+        
+        # Get files specific to this subject
+        subject_files = get_subject_files(manifest, subject)
+        
+        if not subject_files['emotibit_files']:
+            print(f"    ⚠ No EmotiBit files found for {subject} - skipping")
+            continue
+        
+        if not subject_files['event_markers']:
+            print(f"    ⚠ No event markers found for {subject} - skipping")
+            continue
+        
+        # Load metric file for this subject
+        metric_file = find_metric_file_for_subject(subject_files, metric)
+        if not metric_file:
+            print(f"    ⚠ No {metric} file found for {subject} - skipping")
+            continue
+        
+        print(f"    ✓ Loading: {os.path.basename(metric_file)}")
+        df_metric = pd.read_csv(metric_file)
+        
+        # Load event markers for this subject
+        event_markers_path = subject_files['event_markers']['path']
+        print(f"    ✓ Loading: {os.path.basename(event_markers_path)}")
+        df_markers = pd.read_csv(event_markers_path)
+        df_markers = prepare_event_markers_timestamps(df_markers)
+        
+        # Calculate timestamp offset for this subject
+        print(f"    Calculating timestamp offset...")
+        offset = find_timestamp_offset(df_markers, df_metric)
+        
+        # Extract data for each comparison group (event window)
+        for group in comparison_groups:
+            group_label = group['label']
+            composite_label = f"{subject} - {group_label}"
+            
+            print(f"    Extracting: {composite_label}")
+            
+            data = extract_window_data(df_metric, df_markers, offset, group)
+            
+            if len(data) == 0:
+                print(f"      ⚠ No data found - skipping")
+                continue
+            
+            group_data_raw[composite_label] = data
+            print(f"      ✓ {len(data)} data points")
+    
+    if len(group_data_raw) == 0:
+        print(f"  ⚠ Warning: No data extracted for any subject-event combination")
+        return None, []
+    
+    print(f"\n  Successfully loaded {len(group_data_raw)} subject-event combinations")
+    
+    # ═══════════════════════════════════════════════════════════════
+    # STEP 2: Apply analysis method to all combinations
+    # ═══════════════════════════════════════════════════════════════
+    print(f"\n  Applying analysis method: {get_method_label(analysis_method)}")
+    
+    metric_col = list(group_data_raw.values())[0].columns[-1]  # Last column is metric
+    group_data_processed = {}
+    
+    for composite_label, data in group_data_raw.items():
+        try:
+            processed_data = apply_analysis_method(data, metric_col, analysis_method)
+            group_data_processed[composite_label] = processed_data
+            print(f"    ✓ {composite_label}: {len(processed_data)} points")
+        except Exception as e:
+            print(f"    ⚠ Error processing '{composite_label}': {e}")
+            continue
+    
+    if len(group_data_processed) == 0:
+        print(f"  ⚠ Warning: No successfully processed data")
+        return None, []
+    
+    # ═══════════════════════════════════════════════════════════════
+    # STEP 3: Calculate statistics for all combinations
+    # ═══════════════════════════════════════════════════════════════
+    print(f"\n  Calculating statistics...")
+    metric_results = {}
+    
+    for composite_label, data in group_data_processed.items():
+        stats = calculate_statistics(data, metric_col, analysis_method)
+        metric_results[composite_label] = stats
+        print(f"    {composite_label}: mean={stats['mean']:.2f}, std={stats['std']:.2f}, n={stats['count']}")
+    
+    # ═══════════════════════════════════════════════════════════════
+    # STEP 4: Generate visualizations
+    # ═══════════════════════════════════════════════════════════════
+    print(f"\n  Creating visualizations (Plot type: {plot_type})...")
+    plots = []
+    
+    # Main plot based on selected type
+    plot1 = generate_plot(
+        group_data_processed, 
+        metric_col, 
+        metric, 
+        plot_type,
+        analysis_method,
+        output_folder,
+        suffix='_multi_subject'  # ← Distinguish from single-subject plots
+    )
+    if plot1:
+        plots.append(plot1)
+    
+    # Comparison plot (always useful for multi-subject)
+    plot2 = generate_comparison_plot(
+        metric_results, 
+        metric, 
+        analysis_method,
+        output_folder,
+        suffix='_multi_subject'
+    )
+    if plot2:
+        plots.append(plot2)
+    
+    return metric_results, plots
 
 def analyze_hrv_from_ppg(manifest, df_markers, comparison_groups, output_folder):
     """
