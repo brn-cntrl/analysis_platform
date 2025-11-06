@@ -677,7 +677,102 @@ def scan_folder_data():
         traceback.print_exc()
         return jsonify({'error': error_msg}), 500
 
-
+@app.route('/api/scan-psychopy-file', methods=['POST'])
+def scan_psychopy_file():
+    """
+    Scans a PsychoPy CSV file to extract column information and sample data.
+    """
+    try:
+        if 'psychopy_file' not in request.files:
+            return jsonify({'error': 'No PsychoPy file provided'}), 400
+        
+        psychopy_file = request.files['psychopy_file']
+        
+        if not psychopy_file.filename.endswith('.csv'):
+            return jsonify({'error': 'File must be a CSV'}), 400
+        
+        print(f"\n{'='*60}")
+        print(f"SCANNING PSYCHOPY FILE: {psychopy_file.filename}")
+        print(f"{'='*60}\n")
+        
+        # Read the CSV file
+        try:
+            file_content = psychopy_file.read()
+            try:
+                content_str = file_content.decode('utf-8')
+            except UnicodeDecodeError:
+                content_str = file_content.decode('latin-1')
+            
+            df = pd.read_csv(io.StringIO(content_str))
+        except Exception as e:
+            return jsonify({'error': f'Failed to parse CSV: {str(e)}'}), 400
+        
+        print(f"Loaded DataFrame with shape: {df.shape}")
+        print(f"Columns: {df.columns.tolist()}\n")
+        
+        # Extract column information
+        columns = df.columns.tolist()
+        column_types = []
+        
+        for col in columns:
+            # Determine column type
+            dtype = df[col].dtype
+            
+            if pd.api.types.is_numeric_dtype(dtype):
+                col_type = 'numeric'
+            elif pd.api.types.is_datetime64_any_dtype(dtype):
+                col_type = 'datetime'
+            else:
+                # Check if string column might be datetime
+                non_null_values = df[col].dropna()
+                if len(non_null_values) > 0:
+                    sample_val = str(non_null_values.iloc[0])
+                    # Simple heuristic: if it contains date-like patterns
+                    if any(pattern in sample_val.lower() for pattern in ['_', ':', 'am', 'pm']) and \
+                       any(char.isdigit() for char in sample_val):
+                        col_type = 'datetime'
+                    else:
+                        col_type = 'string'
+                else:
+                    col_type = 'string'
+            
+            column_types.append(col_type)
+            print(f"  {col}: {col_type}")
+        
+        # Get sample data (first 10 rows)
+        sample_size = min(10, len(df))
+        sample_df = df.head(sample_size)
+        
+        # Convert to list of dictionaries, handling NaN values
+        sample_data = []
+        for idx, row in sample_df.iterrows():
+            row_dict = {}
+            for col in columns:
+                val = row[col]
+                # Convert NaN to None (null in JSON)
+                if pd.isna(val):
+                    row_dict[col] = None
+                else:
+                    row_dict[col] = val
+            sample_data.append(row_dict)
+        
+        print(f"\nExtracted {len(sample_data)} sample rows")
+        print(f"{'='*60}\n")
+        
+        return jsonify({
+            'columns': columns,
+            'column_types': column_types,
+            'sample_data': sample_data,
+            'row_count': len(df)
+        }), 200
+        
+    except Exception as e:
+        error_msg = f"Error scanning PsychoPy file: {str(e)}"
+        print(error_msg)
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': error_msg}), 500
+    
 @app.route('/api/test-timestamp-matching', methods=['POST'])
 def test_timestamp_matching():
     """

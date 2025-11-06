@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './AnalysisViewer.css';
+import PsychoPyConfigStep from './PsychoPyConfigStep';
+import './PsychoPyConfig.css';
 
 function AnalysisViewer() {
   const [selectedFolder, setSelectedFolder] = useState(null);
@@ -26,7 +28,26 @@ function AnalysisViewer() {
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [subjectAvailability, setSubjectAvailability] = useState({});
   const [batchStatusMessage, setBatchStatusMessage] = useState('');
-  
+
+  // PsychoPy state
+  const [hasPsychoPyFile, setHasPsychoPyFile] = useState(false);
+  const [psychopyFile, setPsychopyFile] = useState(null);
+  const [psychopyColumns, setPsychopyColumns] = useState([]);
+  const [psychopyColumnTypes, setPsychopyColumnTypes] = useState([]);
+  const [psychopySampleData, setPsychopySampleData] = useState([]);
+  const [psychopyConfig, setPsychopyConfig] = useState({
+    timestampColumn: '',
+    timestampFormat: 'seconds',
+    dataColumns: [{
+      column: '',
+      displayName: '',
+      dataType: 'continuous',
+      units: ''
+    }],
+    eventSources: [],
+    conditionColumns: []
+  });
+
   // Wizard state
   const [showConfigWizard, setShowConfigWizard] = useState(false);
   const [wizardStep, setWizardStep] = useState(0);
@@ -48,7 +69,7 @@ function AnalysisViewer() {
 
   // Validate configuration when reaching review step (step 6)
   useEffect(() => {
-    if (wizardStep === 6 && showConfigWizard) {
+    if (wizardStep === (hasPsychoPyFile ? 7 : 6) && showConfigWizard) {
       console.log('Reached review step, validating configuration...');
       console.log('Current state:', {
         selectedSubjects,
@@ -114,6 +135,7 @@ function AnalysisViewer() {
       respirationFiles: [],
       serFiles: [],
       eventMarkersFiles: [],
+      psychopyFiles: [],
       allFiles: files,
       hasPPGFiles: false
     };
@@ -163,6 +185,30 @@ function AnalysisViewer() {
     setUploadStatus(`Folder "${folderName}" selected with ${files.length} files`);
 
     await scanFolderData(structure);
+  };
+
+  const handlePsychopyUpload = async (e) => {
+    const file = e.target.files[0];
+    
+    if (!file) {
+      return;
+    }
+
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      setUploadStatus('PsychoPy file must be a CSV');
+      return;
+    }
+
+    console.log('PsychoPy file selected:', file.name);
+    
+    setHasPsychoPyFile(true);
+    setPsychopyFile({
+      name: file.name,
+      path: file.name,
+      file: file
+    });
+    
+    await scanPsychopyFile(file);
   };
 
   const scanFolderData = async (structure) => {
@@ -246,7 +292,6 @@ function AnalysisViewer() {
           setSelectedSubjects(initialSelection);
         }
 
-        // Initialize selectedMetrics with ALL metrics including HRV
         const initialMetricSelection = {};
         metrics.forEach(metric => {
           initialMetricSelection[metric] = false;
@@ -278,6 +323,38 @@ function AnalysisViewer() {
       }
     } catch (error) {
       setUploadStatus(`Error: ${error.message}`);
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  const scanPsychopyFile = async (file) => {
+    if (!file) return;
+    
+    console.log('Scanning PsychoPy file:', file.name);
+    setIsScanning(true);
+    
+    const formData = new FormData();
+    formData.append('psychopy_file', file);
+    
+    try {
+      const response = await fetch('/api/scan-psychopy-file', {
+        method: 'POST',
+        body: formData,
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok) {
+        setPsychopyColumns(data.columns || []);
+        setPsychopyColumnTypes(data.column_types || []);
+        setPsychopySampleData(data.sample_data || []);
+        
+        console.log('PsychoPy scanned:', data.columns.length, 'columns');
+        setUploadStatus(prev => prev + ` | PsychoPy: ${data.columns.length} cols`);
+      }
+    } catch (error) {
+      console.error('Error scanning PsychoPy:', error);
     } finally {
       setIsScanning(false);
     }
@@ -392,7 +469,8 @@ function AnalysisViewer() {
   };
 
   const nextWizardStep = () => {
-    if (wizardStep < 7) {
+    const maxStep = hasPsychoPyFile ? 8 : 7;
+    if (wizardStep < maxStep) {
       setWizardStep(wizardStep + 1);
     }
   };
@@ -441,7 +519,17 @@ function AnalysisViewer() {
       issues.push('No event markers selected');
     }
     
-    // Only check subject availability if we have subjects selected and data is loaded
+    if (hasPsychoPyFile) {
+      if (!psychopyConfig.timestampColumn) {
+        issues.push('PsychoPy: No timestamp column selected');
+      }
+      
+      const validDataColumns = psychopyConfig.dataColumns.filter(dc => dc.column && dc.displayName);
+      if (validDataColumns.length === 0) {
+        issues.push('PsychoPy: No data columns configured');
+      }
+    }
+
     if (subjectAvailability && Object.keys(subjectAvailability).length > 0 && selectedSubjectsList.length > 0) {
       selectedSubjectsList.forEach(subject => {
         const subjectData = subjectAvailability[subject];
@@ -548,6 +636,14 @@ function AnalysisViewer() {
     formData.append('plot_type', selectedPlotType);
     formData.append('analyze_hrv', JSON.stringify(selectedMetricsList.includes('HRV')));
     formData.append('student_id', localStorage.getItem('studentId'));
+
+    if (hasPsychoPyFile && psychopyFile) {
+      filesToUpload.push(psychopyFile.file);
+      pathsToUpload.push(psychopyFile.path);
+      
+      formData.append('psychopy_config', JSON.stringify(psychopyConfig));
+      formData.append('has_psychopy_data', 'true');
+    }
 
     if (selectedSubjectsList.length > 1) {
       formData.append('selected_subjects', JSON.stringify(selectedSubjectsList));
@@ -812,6 +908,7 @@ function AnalysisViewer() {
       
       <div className="header-card">
         <h1 className="main-title">Experiment Data Analysis</h1>
+        
         <div className="folder-select-section">
           <input 
             type="file" 
@@ -828,6 +925,24 @@ function AnalysisViewer() {
           {selectedFolder && (
             <div className="folder-selected">
               ✓ Folder: <strong>{selectedFolder}</strong>
+            </div>
+          )}
+        </div>
+
+        <div className="folder-select-section" style={{ marginTop: '15px' }}>
+          <input 
+            type="file" 
+            id="psychopy-input-hidden"
+            className="folder-input-hidden"
+            accept=".csv"
+            onChange={handlePsychopyUpload}
+          />
+          <label htmlFor="psychopy-input-hidden" className="browse-button psychopy-upload-btn">
+            Upload PsychoPy Data (Optional)
+          </label>
+          {psychopyFile && (
+            <div className="folder-selected">
+              ✓ PsychoPy: <strong>{psychopyFile.name}</strong>
             </div>
           )}
         </div>
@@ -863,6 +978,15 @@ function AnalysisViewer() {
                 <span className="file-count">{fileStructure.serFiles.length} file(s)</span>
               ) : (
                 <span style={{ color: '#666', fontSize: '14px' }}>⚠️ No files (optional)</span>
+              )}
+            </div>
+
+            <div className="file-category">
+              <strong>PsychoPy Data:</strong>
+              {psychopyFile ? (
+                <span className="file-count">✓ {psychopyFile.name}</span>
+              ) : (
+                <span style={{ color: '#666', fontSize: '14px' }}>⚠️ Not uploaded (optional)</span>
               )}
             </div>
 
@@ -937,7 +1061,7 @@ function AnalysisViewer() {
             </div>
 
             <div className="wizard-breadcrumbs">
-              {['Type', 'Tags', 'Events', 'Conditions', 'Method', 'Plot', 'Review', 'Run'].map((label, idx) => (
+            {['Type', 'Tags', 'Events', 'Conditions', 'Method', 'Plot', ...(hasPsychoPyFile ? ['PsychoPy'] : []), 'Review', 'Run'].map((label, idx) => (
                 <div
                   key={idx}
                   className={`breadcrumb ${wizardStep === idx ? 'active' : ''} ${wizardStep > idx ? 'completed' : ''}`}
@@ -1319,7 +1443,17 @@ function AnalysisViewer() {
                 </div>
               )}
 
-              {wizardStep === 6 && (
+              {hasPsychoPyFile && wizardStep === 6 && (
+                <PsychoPyConfigStep
+                  psychopyColumns={psychopyColumns}
+                  psychopyColumnTypes={psychopyColumnTypes}
+                  psychopySampleData={psychopySampleData}
+                  psychopyConfig={psychopyConfig}
+                  setPsychopyConfig={setPsychopyConfig}
+                />
+              )}
+
+              {wizardStep === (hasPsychoPyFile ? 7 : 6) && (
                 <div className="wizard-section">
                   <h3 className="wizard-section-title">Configuration Review</h3>
                   <p className="wizard-section-description">
@@ -1366,7 +1500,7 @@ function AnalysisViewer() {
                 </div>
               )}
 
-              {wizardStep === 7 && (
+              {wizardStep === (hasPsychoPyFile ? 8 : 7) && (
                 <div className="wizard-section wizard-final">
                   {/* <h3 className="wizard-section-title">Run Analysis</h3> */}
                   <p className="wizard-section-description">
@@ -1400,12 +1534,12 @@ function AnalysisViewer() {
               </button>
 
               <div className="wizard-progress">
-                Step {wizardStep + 1} of 8
+                Step {wizardStep + 1} of {hasPsychoPyFile ? 9 : 8}
               </div>
 
               <button
                 onClick={nextWizardStep}
-                disabled={wizardStep === 7}
+                disabled={wizardStep === (hasPsychoPyFile ? 8 : 7)}
                 className="wizard-nav-btn next"
               >
                 Next →
