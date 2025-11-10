@@ -28,25 +28,31 @@ function AnalysisViewer() {
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [subjectAvailability, setSubjectAvailability] = useState({});
   const [batchStatusMessage, setBatchStatusMessage] = useState('');
+  
+  // PsychoPy state - UPDATED FOR MULTIPLE FILES
+  const [psychopyFilesBySubject, setPsychopyFilesBySubject] = useState({});
+  const [hasPsychoPyFiles, setHasPsychoPyFiles] = useState(false);
+  const [subjectsWithPsychopy, setSubjectsWithPsychopy] = useState([]);
+  const [psychopyConfigs, setPsychopyConfigs] = useState({});
 
-  // PsychoPy state
-  const [hasPsychoPyFile, setHasPsychoPyFile] = useState(false);
-  const [psychopyFile, setPsychopyFile] = useState(null);
-  const [psychopyColumns, setPsychopyColumns] = useState([]);
-  const [psychopyColumnTypes, setPsychopyColumnTypes] = useState([]);
-  const [psychopySampleData, setPsychopySampleData] = useState([]);
-  const [psychopyConfig, setPsychopyConfig] = useState({
-    timestampColumn: '',
-    timestampFormat: 'seconds',
-    dataColumns: [{
-      column: '',
-      displayName: '',
-      dataType: 'continuous',
-      units: ''
-    }],
-    eventSources: [],
-    conditionColumns: []
-  });
+  // // PsychoPy state
+  // const [hasPsychoPyFile, setHasPsychoPyFile] = useState(false);
+  // const [psychopyFile, setPsychopyFile] = useState(null);
+  // const [psychopyColumns, setPsychopyColumns] = useState([]);
+  // const [psychopyColumnTypes, setPsychopyColumnTypes] = useState([]);
+  // const [psychopySampleData, setPsychopySampleData] = useState([]);
+  // const [psychopyConfig, setPsychopyConfig] = useState({
+  //   timestampColumn: '',
+  //   timestampFormat: 'seconds',
+  //   dataColumns: [{
+  //     column: '',
+  //     displayName: '',
+  //     dataType: 'continuous',
+  //     units: ''
+  //   }],
+  //   eventSources: [],
+  //   conditionColumns: []
+  // });
 
   // Wizard state
   const [showConfigWizard, setShowConfigWizard] = useState(false);
@@ -69,7 +75,7 @@ function AnalysisViewer() {
 
   // Validate configuration when reaching review step (step 6)
   useEffect(() => {
-    if (wizardStep === (hasPsychoPyFile ? 7 : 6) && showConfigWizard) {
+    if (wizardStep === (hasPsychoPyFiles ? 7 : 6) && showConfigWizard) {
       console.log('Reached review step, validating configuration...');
       console.log('Current state:', {
         selectedSubjects,
@@ -168,6 +174,13 @@ function AnalysisViewer() {
           path: path,
           file: file
         });
+      } else if (path.includes('psychopy_data/') && fileName.endsWith('.csv')) {
+        // Detect PsychoPy files
+        structure.psychopyFiles.push({
+          name: file.name,
+          path: path,
+          file: file
+        });
       }
     });
 
@@ -187,30 +200,6 @@ function AnalysisViewer() {
     await scanFolderData(structure);
   };
 
-  const handlePsychopyUpload = async (e) => {
-    const file = e.target.files[0];
-    
-    if (!file) {
-      return;
-    }
-
-    if (!file.name.toLowerCase().endsWith('.csv')) {
-      setUploadStatus('PsychoPy file must be a CSV');
-      return;
-    }
-
-    console.log('PsychoPy file selected:', file.name);
-    
-    setHasPsychoPyFile(true);
-    setPsychopyFile({
-      name: file.name,
-      path: file.name,
-      file: file
-    });
-    
-    await scanPsychopyFile(file);
-  };
-
   const scanFolderData = async (structure) => {
     if (!structure.emotibitFiles || structure.emotibitFiles.length === 0) {
       setUploadStatus('No EmotiBit files found');
@@ -219,6 +208,58 @@ function AnalysisViewer() {
 
     setIsScanning(true);
     setUploadStatus('Scanning folder data...');
+
+    const readPsychoPyFile = (file) => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            const text = e.target.result;
+            const lines = text.split('\n');
+            const headers = lines[0].split(',').map(h => h.trim()).filter(h => h && !h.startsWith('Unnamed:'));
+            
+            // Parse sample rows
+            const sampleData = [];
+            for (let i = 1; i < Math.min(6, lines.length); i++) {
+              if (lines[i].trim()) {
+                const values = lines[i].split(',');
+                const rowObj = {};
+                headers.forEach((header, idx) => {
+                  rowObj[header] = values[idx]?.trim() || null;
+                });
+                sampleData.push(rowObj);
+              }
+            }
+            
+            // Determine column types
+            const columnTypes = headers.map(header => {
+              const sampleValues = sampleData.map(row => row[header]).filter(v => v !== null && v !== '');
+              if (sampleValues.length === 0) return 'string';
+              
+              const firstValue = sampleValues[0];
+              if (!isNaN(parseFloat(firstValue)) && isFinite(firstValue)) {
+                return 'numeric';
+              }
+              if (firstValue.includes(':') || firstValue.includes('_') || /\d/.test(firstValue)) {
+                return 'datetime';
+              }
+              return 'string';
+            });
+            
+            resolve({
+              columns: headers,
+              column_types: columnTypes,
+              sample_data: sampleData,
+              row_count: lines.length - 1
+            });
+          } catch (error) {
+            reject(error);
+          }
+        };
+        reader.onerror = reject;
+        reader.readAsText(file);
+      });
+    };
 
     const formData = new FormData();
     
@@ -251,7 +292,44 @@ function AnalysisViewer() {
       }
     }
 
-    try {
+    const psychopyMetadata = {};
+    const psychopyPromises = [];
+
+    structure.psychopyFiles.forEach(psychopyFile => {
+      const parts = psychopyFile.path.split('/');
+      if (parts.length >= 3) {
+        const subject = parts[1];
+        const filename = parts[parts.length - 1];
+        const filenameparts = filename.replace('.csv', '').split('_');
+        const experimentName = filenameparts.length >= 3 ? filenameparts[2] : 'Unknown';
+        
+        const promise = readPsychoPyFile(psychopyFile.file).then(metadata => {
+          if (!psychopyMetadata[subject]) {
+            psychopyMetadata[subject] = [];
+          }
+          psychopyMetadata[subject].push({
+            filename: filename,
+            path: psychopyFile.path,
+            experiment_name: experimentName,
+            ...metadata
+          });
+        }).catch(error => {
+          console.error(`Error reading PsychoPy file ${filename}:`, error);
+        });
+        
+        psychopyPromises.push(promise);
+      }
+    });
+
+    // Wait for all PsychoPy files to be read
+    await Promise.all(psychopyPromises);
+
+    // Send metadata instead of files
+    if (Object.keys(psychopyMetadata).length > 0) {
+      formData.append('psychopy_metadata', JSON.stringify(psychopyMetadata));
+    }
+
+    try { 
       const response = await fetch('/api/scan-folder-data', {
         method: 'POST',
         body: formData,
@@ -302,6 +380,37 @@ function AnalysisViewer() {
         if (data.subject_availability) {
           setSubjectAvailability(data.subject_availability);
         }
+        
+        if (data.psychopy_data && data.psychopy_data.has_files) {
+          console.log('PsychoPy files detected:', data.psychopy_data.files_by_subject);
+          setPsychopyFilesBySubject(data.psychopy_data.files_by_subject);
+          setSubjectsWithPsychopy(data.psychopy_data.subjects_with_psychopy);
+          setHasPsychoPyFiles(true);
+          
+          // Initialize configs for each file
+          const initialConfigs = {};
+          Object.entries(data.psychopy_data.files_by_subject).forEach(([subject, files]) => {
+            initialConfigs[subject] = {};
+            files.forEach(fileData => {
+              initialConfigs[subject][fileData.filename] = {
+                timestampColumn: '',
+                timestampFormat: 'seconds',
+                dataColumns: [{
+                  column: '',
+                  displayName: '',
+                  dataType: 'continuous',
+                  units: ''
+                }],
+                eventSources: [],
+                conditionColumns: []
+              };
+            });
+          });
+          setPsychopyConfigs(initialConfigs);
+        } else {
+          setHasPsychoPyFiles(false);
+          setPsychopyFilesBySubject({});
+        }
 
         const eventMarkersMsg = data.event_markers && data.event_markers.length > 0 
           ? `, ${data.event_markers.length} event markers` 
@@ -313,48 +422,20 @@ function AnalysisViewer() {
           ? `, ${data.subjects.length} subjects detected`
           : '';
 
+        const psychopyMsg = data.psychopy_data && data.psychopy_data.has_files
+        ? `, PsychoPy data found for ${data.psychopy_data.subjects_with_psychopy.length} subject(s)`
+        : '';
+        
         if (data.batch_mode && data.subjects && data.subjects.length > 1) {
           const intersectionMsg = `📊 Showing ${data.metrics.length} common metrics, ${data.event_markers.length} common markers, ${data.conditions.length} common conditions across ${data.subjects.length} subjects`;
           setBatchStatusMessage(intersectionMsg);
         }
-        setUploadStatus(`Found ${metrics.length} metrics${eventMarkersMsg}${conditionsMsg}${subjectsMsg}`);
+        setUploadStatus(`Found ${metrics.length} metrics${eventMarkersMsg}${conditionsMsg}${subjectsMsg}${psychopyMsg}`);
       } else {
         setUploadStatus(`Error scanning folder: ${data.error}`);
       }
     } catch (error) {
       setUploadStatus(`Error: ${error.message}`);
-    } finally {
-      setIsScanning(false);
-    }
-  };
-
-  const scanPsychopyFile = async (file) => {
-    if (!file) return;
-    
-    console.log('Scanning PsychoPy file:', file.name);
-    setIsScanning(true);
-    
-    const formData = new FormData();
-    formData.append('psychopy_file', file);
-    
-    try {
-      const response = await fetch('/api/scan-psychopy-file', {
-        method: 'POST',
-        body: formData,
-      });
-      
-      const data = await response.json();
-      
-      if (response.ok) {
-        setPsychopyColumns(data.columns || []);
-        setPsychopyColumnTypes(data.column_types || []);
-        setPsychopySampleData(data.sample_data || []);
-        
-        console.log('PsychoPy scanned:', data.columns.length, 'columns');
-        setUploadStatus(prev => prev + ` | PsychoPy: ${data.columns.length} cols`);
-      }
-    } catch (error) {
-      console.error('Error scanning PsychoPy:', error);
     } finally {
       setIsScanning(false);
     }
@@ -469,7 +550,7 @@ function AnalysisViewer() {
   };
 
   const nextWizardStep = () => {
-    const maxStep = hasPsychoPyFile ? 8 : 7;
+    const maxStep = hasPsychoPyFiles ? 8 : 7;
     if (wizardStep < maxStep) {
       setWizardStep(wizardStep + 1);
     }
@@ -519,15 +600,23 @@ function AnalysisViewer() {
       issues.push('No event markers selected');
     }
     
-    if (hasPsychoPyFile) {
-      if (!psychopyConfig.timestampColumn) {
-        issues.push('PsychoPy: No timestamp column selected');
-      }
-      
-      const validDataColumns = psychopyConfig.dataColumns.filter(dc => dc.column && dc.displayName);
-      if (validDataColumns.length === 0) {
-        issues.push('PsychoPy: No data columns configured');
-      }
+    if (hasPsychoPyFiles) {
+      // Validate PsychoPy configs for selected subjects
+      selectedSubjectsList.forEach(subject => {
+        if (subjectsWithPsychopy.includes(subject)) {
+          const subjectConfigs = psychopyConfigs[subject] || {};
+          Object.entries(subjectConfigs).forEach(([filename, config]) => {
+            if (!config.timestampColumn) {
+              issues.push(`PsychoPy (${subject}/${filename}): No timestamp column selected`);
+            }
+            
+            const validDataColumns = config.dataColumns.filter(dc => dc.column && dc.displayName);
+            if (validDataColumns.length === 0) {
+              issues.push(`PsychoPy (${subject}/${filename}): No data columns configured`);
+            }
+          });
+        }
+      });
     }
 
     if (subjectAvailability && Object.keys(subjectAvailability).length > 0 && selectedSubjectsList.length > 0) {
@@ -637,11 +726,21 @@ function AnalysisViewer() {
     formData.append('analyze_hrv', JSON.stringify(selectedMetricsList.includes('HRV')));
     formData.append('student_id', localStorage.getItem('studentId'));
 
-    if (hasPsychoPyFile && psychopyFile) {
-      filesToUpload.push(psychopyFile.file);
-      pathsToUpload.push(psychopyFile.path);
+    if (hasPsychoPyFiles) {
+      selectedSubjectsList.forEach(subject => {
+        if (subjectsWithPsychopy.includes(subject) && psychopyFilesBySubject[subject]) {
+          psychopyFilesBySubject[subject].forEach(fileData => {
+            const psychopyFile = fileStructure.psychopyFiles.find(f => f.path === fileData.path);
+            if (psychopyFile && !addedFilePaths.has(psychopyFile.path)) {
+              filesToUpload.push(psychopyFile.file);
+              pathsToUpload.push(psychopyFile.path);
+              addedFilePaths.add(psychopyFile.path);
+            }
+          });
+        }
+      });
       
-      formData.append('psychopy_config', JSON.stringify(psychopyConfig));
+      formData.append('psychopy_configs', JSON.stringify(psychopyConfigs));
       formData.append('has_psychopy_data', 'true');
     }
 
@@ -928,24 +1027,6 @@ function AnalysisViewer() {
             </div>
           )}
         </div>
-
-        <div className="folder-select-section" style={{ marginTop: '15px' }}>
-          <input 
-            type="file" 
-            id="psychopy-input-hidden"
-            className="folder-input-hidden"
-            accept=".csv"
-            onChange={handlePsychopyUpload}
-          />
-          <label htmlFor="psychopy-input-hidden" className="browse-button psychopy-upload-btn">
-            Upload PsychoPy Data (Optional)
-          </label>
-          {psychopyFile && (
-            <div className="folder-selected">
-              ✓ PsychoPy: <strong>{psychopyFile.name}</strong>
-            </div>
-          )}
-        </div>
       </div>
 
       {fileStructure && (
@@ -983,10 +1064,10 @@ function AnalysisViewer() {
 
             <div className="file-category">
               <strong>PsychoPy Data:</strong>
-              {psychopyFile ? (
-                <span className="file-count">✓ {psychopyFile.name}</span>
+              {fileStructure.psychopyFiles.length > 0 ? (
+                <span className="file-count">✓ {fileStructure.psychopyFiles.length} file(s) from {subjectsWithPsychopy.length} subject(s)</span>
               ) : (
-                <span style={{ color: '#666', fontSize: '14px' }}>⚠️ Not uploaded (optional)</span>
+                <span style={{ color: '#666', fontSize: '14px' }}>⚠️ Not found (optional)</span>
               )}
             </div>
 
@@ -1061,7 +1142,7 @@ function AnalysisViewer() {
             </div>
 
             <div className="wizard-breadcrumbs">
-            {['Type', 'Tags', 'Events', 'Conditions', 'Method', 'Plot', ...(hasPsychoPyFile ? ['PsychoPy'] : []), 'Review', 'Run'].map((label, idx) => (
+            {['Type', 'Tags', 'Events', 'Conditions', 'Method', 'Plot', ...(hasPsychoPyFiles ? ['PsychoPy'] : []), 'Review', 'Run'].map((label, idx) => (
                 <div
                   key={idx}
                   className={`breadcrumb ${wizardStep === idx ? 'active' : ''} ${wizardStep > idx ? 'completed' : ''}`}
@@ -1443,17 +1524,16 @@ function AnalysisViewer() {
                 </div>
               )}
 
-              {hasPsychoPyFile && wizardStep === 6 && (
+              {hasPsychoPyFiles && wizardStep === 6 && (
                 <PsychoPyConfigStep
-                  psychopyColumns={psychopyColumns}
-                  psychopyColumnTypes={psychopyColumnTypes}
-                  psychopySampleData={psychopySampleData}
-                  psychopyConfig={psychopyConfig}
-                  setPsychopyConfig={setPsychopyConfig}
+                  psychopyFilesBySubject={psychopyFilesBySubject}
+                  selectedSubjects={selectedSubjects}
+                  psychopyConfigs={psychopyConfigs}
+                  setPsychopyConfigs={setPsychopyConfigs}
                 />
               )}
 
-              {wizardStep === (hasPsychoPyFile ? 7 : 6) && (
+              {wizardStep === (hasPsychoPyFiles ? 7 : 6) && (
                 <div className="wizard-section">
                   <h3 className="wizard-section-title">Configuration Review</h3>
                   <p className="wizard-section-description">
@@ -1479,6 +1559,11 @@ function AnalysisViewer() {
                     <div className="summary-item">
                       <strong>Plot Type:</strong> {selectedPlotType}
                     </div>
+                    {hasPsychoPyFiles && (
+                      <div className="summary-item">
+                        <strong>PsychoPy Files:</strong> {subjectsWithPsychopy.filter(s => selectedSubjects[s]).length} subject(s) with data
+                      </div>
+                    )}
                   </div>
 
                   {configIssues.length > 0 && (
@@ -1500,7 +1585,7 @@ function AnalysisViewer() {
                 </div>
               )}
 
-              {wizardStep === (hasPsychoPyFile ? 8 : 7) && (
+              {wizardStep === (hasPsychoPyFiles ? 8 : 7) && (
                 <div className="wizard-section wizard-final">
                   {/* <h3 className="wizard-section-title">Run Analysis</h3> */}
                   <p className="wizard-section-description">
@@ -1534,12 +1619,12 @@ function AnalysisViewer() {
               </button>
 
               <div className="wizard-progress">
-                Step {wizardStep + 1} of {hasPsychoPyFile ? 9 : 8}
+                Step {wizardStep + 1} of {hasPsychoPyFiles ? 9 : 8}
               </div>
 
               <button
                 onClick={nextWizardStep}
-                disabled={wizardStep === (hasPsychoPyFile ? 8 : 7)}
+                disabled={wizardStep === (hasPsychoPyFiles ? 8 : 7)}
                 className="wizard-nav-btn next"
               >
                 Next →
