@@ -210,9 +210,9 @@
 
 .event-source-config {
   padding: 15px;
-  background-color: #fff3cd;
+  background-color: #e8f5e9;
   border-radius: 6px;
-  border: 2px solid #ffc107;
+  border: 2px solid #4CAF50;
 }
 
 .event-source-row {
@@ -344,16 +344,16 @@
 .config-summary-box {
   margin-top: 25px;
   padding: 20px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 8px;
-  color: white;
+  background-color: #e8f5e9;
+  border-radius: 6px;
+  border: 2px solid #4CAF50;
 }
 
 .summary-title {
   font-size: 16px;
   font-weight: 700;
   margin-bottom: 15px;
-  color: white;
+  color: rgb(75, 77, 74);
 }
 
 .summary-grid {
@@ -608,18 +608,18 @@
 .file-config-summary-box {
   margin-top: 20px;
   padding: 15px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 8px;
-  color: white;
+  background-color: #e8f5e9;
+  border-radius: 6px;
+  border: 2px solid #4CAF50;
 }
 
 /* Overall Summary */
 .psychopy-overall-summary {
   margin-top: 25px;
   padding: 20px;
-  background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-  border-radius: 8px;
-  color: white;
+  background-color: #e8f5e9;
+  border-radius: 6px;
+  border: 2px solid #4CAF50;
 }
 
 .psychopy-overall-summary .summary-title {
@@ -644,4 +644,80 @@
 
 .subject-summary-item strong {
   margin-right: 8px;
+}
+
+/* Condition Columns - Same styling as Event Sources */
+.condition-sources-list {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  margin-bottom: 15px;
+}
+
+.condition-source-config {
+  padding: 15px;
+  background-color: #e8f5e9;
+  border-radius: 6px;
+  border: 2px solid #4CAF50;
+}
+
+.condition-source-row {
+  display: grid;
+  grid-template-columns: 2fr 1.5fr 1.5fr auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.condition-source-select {
+  padding: 8px 10px;
+  border: 2px solid #ddd;
+  border-radius: 4px;
+  font-size: 13px;
+  background-color: white;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.condition-source-select:focus {
+  outline: none;
+  border-color: #4CAF50;
+}
+
+.remove-condition-source-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background-color: #e74c3c;
+  color: white;
+  border-radius: 4px;
+  font-size: 20px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.remove-condition-source-btn:hover {
+  background-color: #c0392b;
+  transform: scale(1.05);
+}
+
+.add-condition-source-btn {
+  width: 100%;
+  padding: 10px;
+  border: 2px dashed #4CAF50;
+  background-color: white;
+  color: #2e7d32;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.add-condition-source-btn:hover {
+  background-color: #e8f5e9;
+  border-color: #2e7d32;
 }

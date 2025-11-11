@@ -216,11 +216,18 @@ function AnalysisViewer() {
           try {
             const text = e.target.result;
             const lines = text.split('\n');
-            const headers = lines[0].split(',').map(h => h.trim()).filter(h => h && !h.startsWith('Unnamed:'));
             
-            // Parse sample rows
+            // Parse headers - remove empty headers from trailing commas
+            const headers = lines[0].split(',')
+              .map(h => h.trim())
+              .filter(h => h && !h.startsWith('Unnamed:'));
+            
+            console.log(`📄 Parsing ${file.name}`);
+            console.log(`Found ${headers.length} headers:`, headers);
+            
+            // Parse sample rows - read up to 10 rows for better sampling
             const sampleData = [];
-            for (let i = 1; i < Math.min(6, lines.length); i++) {
+            for (let i = 1; i < Math.min(11, lines.length); i++) {
               if (lines[i].trim()) {
                 const values = lines[i].split(',');
                 const rowObj = {};
@@ -231,20 +238,78 @@ function AnalysisViewer() {
               }
             }
             
-            // Determine column types
+            console.log(`Parsed ${sampleData.length} sample rows`);
+            
+            // Determine column types with better logic
             const columnTypes = headers.map(header => {
-              const sampleValues = sampleData.map(row => row[header]).filter(v => v !== null && v !== '');
-              if (sampleValues.length === 0) return 'string';
+              const sampleValues = sampleData
+                .map(row => row[header])
+                .filter(v => v !== null && v !== '' && v !== undefined);
               
-              const firstValue = sampleValues[0];
-              if (!isNaN(parseFloat(firstValue)) && isFinite(firstValue)) {
+              console.log(`Column "${header}": ${sampleValues.length} non-empty samples`, sampleValues.slice(0, 3));
+              
+              // If no sample data, use column name heuristics
+              if (sampleValues.length === 0) {
+                const lowerHeader = header.toLowerCase();
+                // Check for timing/numeric column indicators in name
+                if (lowerHeader.includes('time') || 
+                    lowerHeader.includes('date') || 
+                    lowerHeader.includes('.t') || 
+                    lowerHeader === 't' ||
+                    lowerHeader.includes('_t') ||
+                    lowerHeader.includes('trial') ||
+                    lowerHeader.includes('session') ||
+                    lowerHeader.includes('rating') ||
+                    lowerHeader.includes('accuracy') ||
+                    lowerHeader.includes('rt') ||
+                    lowerHeader.includes('digit')) {
+                  console.log(`  -> Inferred as NUMERIC (from name)`);
+                  return 'numeric';
+                }
+                console.log(`  -> Defaulting to STRING (no data)`);
+                return 'string';
+              }
+              
+              // Check actual values
+              let numericCount = 0;
+              let datetimeCount = 0;
+              
+              for (const value of sampleValues) {
+                const trimmedValue = String(value).trim();
+                
+                // Check if numeric (including floats and negatives)
+                if (!isNaN(parseFloat(trimmedValue)) && isFinite(trimmedValue)) {
+                  numericCount++;
+                }
+                // Check if datetime (strict criteria - not emails!)
+                else if ((trimmedValue.match(/^\d{4}-\d{2}-\d{2}$/)) || // YYYY-MM-DD
+                        (trimmedValue.match(/^\d{2}:\d{2}:\d{2}$/)) || // HH:MM:SS
+                        (trimmedValue.match(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/))) { // Full datetime
+                  datetimeCount++;
+                }
+              }
+              
+              const totalValues = sampleValues.length;
+              const numericRatio = numericCount / totalValues;
+              const datetimeRatio = datetimeCount / totalValues;
+              
+              console.log(`  -> ${numericCount}/${totalValues} numeric (${(numericRatio * 100).toFixed(0)}%)`);
+              
+              if (numericRatio >= 0.5) {
+                console.log(`  -> Classified as NUMERIC`);
                 return 'numeric';
               }
-              if (firstValue.includes(':') || firstValue.includes('_') || /\d/.test(firstValue)) {
+              if (datetimeRatio >= 0.5) {
+                console.log(`  -> Classified as DATETIME`);
                 return 'datetime';
               }
+              
+              console.log(`  -> Classified as STRING`);
               return 'string';
             });
+            
+            console.log('Final column types:', columnTypes);
+            console.log('Numeric columns:', headers.filter((h, i) => columnTypes[i] === 'numeric'));
             
             resolve({
               columns: headers,
@@ -253,6 +318,7 @@ function AnalysisViewer() {
               row_count: lines.length - 1
             });
           } catch (error) {
+            console.error('Error parsing PsychoPy file:', error);
             reject(error);
           }
         };
@@ -1098,7 +1164,7 @@ function AnalysisViewer() {
               disabled={isScanning || !fileStructure}
               className="config-analysis-btn"
             >
-              ⚙️ Configure Analysis
+              Configure Analysis
             </button>
 
             {uploadStatus && (

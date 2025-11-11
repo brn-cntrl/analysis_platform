@@ -94,34 +94,62 @@ function PsychoPyConfigStep({
     updateConfig(subject, filename, 'eventSources', updated);
   };
 
-  const updateConditionColumns = (subject, filename, column, isSelected) => {
+  const addConditionColumn = (subject, filename) => {
     const currentConfig = psychopyConfigs[subject][filename];
-    const currentColumns = currentConfig.conditionColumns || [];
-    
-    if (isSelected) {
-      // Add column if not already present
-      if (!currentColumns.includes(column)) {
-        updateConfig(subject, filename, 'conditionColumns', [...currentColumns, column]);
+    updateConfig(subject, filename, 'conditionColumns', [
+      ...currentConfig.conditionColumns,
+      {
+        column: '',
+        labelType: 'direct',
+        customPrefix: ''
       }
-    } else {
-      // Remove column
-      updateConfig(subject, filename, 'conditionColumns', currentColumns.filter(c => c !== column));
-    }
+    ]);
   };
+
+  const removeConditionColumn = (subject, filename, index) => {
+    const currentConfig = psychopyConfigs[subject][filename];
+    updateConfig(
+      subject,
+      filename,
+      'conditionColumns',
+      currentConfig.conditionColumns.filter((_, i) => i !== index)
+    );
+  };
+
+  const updateConditionColumn = (subject, filename, index, field, value) => {
+    const currentConfig = psychopyConfigs[subject][filename];
+    const updated = [...currentConfig.conditionColumns];
+    updated[index] = { ...updated[index], [field]: value };
+    updateConfig(subject, filename, 'conditionColumns', updated);
+  };
+  // const updateConditionColumns = (subject, filename, column, isSelected) => {
+  //   const currentConfig = psychopyConfigs[subject][filename];
+  //   const currentColumns = currentConfig.conditionColumns || [];
+    
+  //   if (isSelected) {
+  //     // Add column if not already present
+  //     if (!currentColumns.includes(column)) {
+  //       updateConfig(subject, filename, 'conditionColumns', [...currentColumns, column]);
+  //     }
+  //   } else {
+  //     // Remove column
+  //     updateConfig(subject, filename, 'conditionColumns', currentColumns.filter(c => c !== column));
+  //   }
+  // };
 
   const getFileData = (subject, filename) => {
     const subjectFiles = psychopyFilesBySubject[subject] || [];
     return subjectFiles.find(f => f.filename === filename);
   };
 
-  const getNumericColumns = (subject, filename) => {
-    const fileData = getFileData(subject, filename);
-    if (!fileData) return [];
+  // const getNumericColumns = (subject, filename) => {
+  //   const fileData = getFileData(subject, filename);
+  //   if (!fileData) return [];
     
-    return fileData.columns.filter((col, idx) => 
-      fileData.column_types[idx] === 'numeric'
-    );
-  };
+  //   return fileData.columns.filter((col, idx) => 
+  //     fileData.column_types[idx] === 'numeric'
+  //   );
+  // };
 
   const getUniqueValues = (subject, filename, column) => {
     const fileData = getFileData(subject, filename);
@@ -136,25 +164,25 @@ function PsychoPyConfigStep({
     return Array.from(values).slice(0, 5);
   };
 
-  const getConditionCandidates = (subject, filename) => {
-    const fileData = getFileData(subject, filename);
-    if (!fileData) return [];
+  // const getConditionCandidates = (subject, filename) => {
+  //   const fileData = getFileData(subject, filename);
+  //   if (!fileData) return [];
     
-    const candidates = [];
-    fileData.columns.forEach((col, idx) => {
-      const uniqueValues = getUniqueValues(subject, filename, col);
-      // Only show columns with 2-10 unique values as potential conditions
-      if (uniqueValues.length >= 2 && uniqueValues.length <= 10) {
-        candidates.push({
-          column: col,
-          valueCount: uniqueValues.length,
-          sampleValues: uniqueValues
-        });
-      }
-    });
+  //   const candidates = [];
+  //   fileData.columns.forEach((col, idx) => {
+  //     const uniqueValues = getUniqueValues(subject, filename, col);
+  //     // Only show columns with 2-10 unique values as potential conditions
+  //     if (uniqueValues.length >= 2 && uniqueValues.length <= 10) {
+  //       candidates.push({
+  //         column: col,
+  //         valueCount: uniqueValues.length,
+  //         sampleValues: uniqueValues
+  //       });
+  //     }
+  //   });
     
-    return candidates;
-  };
+  //   return candidates;
+  // };
 
   // Get selected subjects that have PsychoPy data
   const selectedSubjectsWithPsychopy = Object.keys(selectedSubjects)
@@ -239,7 +267,7 @@ function PsychoPyConfigStep({
                           className="psychopy-select"
                         >
                           <option value="">Select timestamp column...</option>
-                          {getNumericColumns(subject, fileData.filename).map(col => (
+                          {fileData.columns.map(col => (
                             <option key={col} value={col}>{col}</option>
                           ))}
                         </select>
@@ -313,7 +341,7 @@ function PsychoPyConfigStep({
                                   className="display-name-input"
                                 />
 
-                                <select
+                                {/* <select
                                   value={dataCol.dataType}
                                   onChange={(e) => updateDataColumn(subject, fileData.filename, idx, 'dataType', e.target.value)}
                                   className="data-type-select"
@@ -321,15 +349,15 @@ function PsychoPyConfigStep({
                                   <option value="continuous">Continuous</option>
                                   <option value="binary">Binary</option>
                                   <option value="count">Count</option>
-                                </select>
+                                </select> */}
 
-                                <input
+                                {/* <input
                                   type="text"
                                   value={dataCol.units}
                                   onChange={(e) => updateDataColumn(subject, fileData.filename, idx, 'units', e.target.value)}
                                   placeholder="Units"
                                   className="units-input"
-                                />
+                                /> */}
 
                                 {config.dataColumns.length > 1 && (
                                   <button
@@ -432,48 +460,77 @@ function PsychoPyConfigStep({
                         </button>
                       </div>
 
-                      {/* Condition Columns - DROPDOWN ONLY */}
+                      {/* Condition Columns - Same as Event Sources */}
                       <div className="config-subsection">
-                        <h5 className="subsection-title">4. Select Condition Columns (Optional)</h5>
+                        <h5 className="subsection-title">4. Map Condition Columns (Optional)</h5>
                         <p className="subsection-description">
-                          Choose columns representing experimental conditions for grouping/filtering.
+                          Select columns representing experimental conditions for grouping/filtering.
                         </p>
 
-                        <div className="condition-dropdown-list">
-                          {getConditionCandidates(subject, fileData.filename).map(candidate => {
-                            const isSelected = (config.conditionColumns || []).includes(candidate.column);
-                            
-                            return (
-                              <div key={candidate.column} className="condition-dropdown-item">
+                        <div className="condition-sources-list">
+                          {config.conditionColumns.map((condition, idx) => (
+                            <div key={idx} className="condition-source-config">
+                              <div className="condition-source-row">
                                 <select
-                                  value={isSelected ? 'selected' : 'not-selected'}
-                                  onChange={(e) => updateConditionColumns(
-                                    subject, 
-                                    fileData.filename, 
-                                    candidate.column, 
-                                    e.target.value === 'selected'
-                                  )}
-                                  className="condition-dropdown-select"
+                                  value={condition.column}
+                                  onChange={(e) => updateConditionColumn(subject, fileData.filename, idx, 'column', e.target.value)}
+                                  className="condition-source-select"
                                 >
-                                  <option value="not-selected">Don't use: {candidate.column}</option>
-                                  <option value="selected">✓ Use: {candidate.column}</option>
+                                  <option value="">Select column...</option>
+                                  {fileData.columns.map(col => (
+                                    <option key={col} value={col}>{col}</option>
+                                  ))}
                                 </select>
-                                <span className="condition-values-info">
-                                  {candidate.valueCount} values: {candidate.sampleValues.join(', ')}
-                                </span>
+
+                                <select
+                                  value={condition.labelType}
+                                  onChange={(e) => updateConditionColumn(subject, fileData.filename, idx, 'labelType', e.target.value)}
+                                  className="label-type-select"
+                                >
+                                  <option value="direct">Use values directly</option>
+                                  <option value="prefixed">Add custom prefix</option>
+                                </select>
+
+                                {condition.labelType === 'prefixed' && (
+                                  <input
+                                    type="text"
+                                    value={condition.customPrefix}
+                                    onChange={(e) => updateConditionColumn(subject, fileData.filename, idx, 'customPrefix', e.target.value)}
+                                    placeholder="Prefix (e.g., 'cond_')"
+                                    className="prefix-input"
+                                  />
+                                )}
+
+                                <button
+                                  onClick={() => removeConditionColumn(subject, fileData.filename, idx)}
+                                  className="remove-condition-source-btn"
+                                >
+                                  ×
+                                </button>
                               </div>
-                            );
-                          })}
-                          
-                          {getConditionCandidates(subject, fileData.filename).length === 0 && (
-                            <div className="no-conditions-message">
-                              No suitable condition columns found (need 2-10 unique values)
+
+                              {condition.column && (
+                                <div className="column-preview">
+                                  Will create conditions: {getUniqueValues(subject, fileData.filename, condition.column).map(v => 
+                                    condition.labelType === 'prefixed' && condition.customPrefix 
+                                      ? `${condition.customPrefix}${v}` 
+                                      : v
+                                  ).join(', ')}
+                                </div>
+                              )}
                             </div>
-                          )}
+                          ))}
                         </div>
 
+                        <button 
+                          onClick={() => addConditionColumn(subject, fileData.filename)} 
+                          className="add-condition-source-btn"
+                        >
+                          + Add Condition Column
+                        </button>
+
                         <div className="selection-summary">
-                          {(config.conditionColumns || []).length} condition column(s) selected
+                          {config.conditionColumns.filter(cc => cc.column).length} condition column(s) selected
                         </div>
                       </div>
 
