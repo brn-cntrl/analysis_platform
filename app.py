@@ -148,6 +148,24 @@ def upload_folder_and_analyze():
     - Prints diagnostic information to stdout for debugging/logging.
     """
     
+    # ============================================================================
+    # DEBUG: Log incoming request
+    # ============================================================================
+    print("\n" + "="*80)
+    print("📥 UPLOAD AND ANALYZE REQUEST")
+    print("="*80)
+    print(f"Student ID: {request.form.get('student_id', 'unknown')}")
+    print(f"Folder name: {request.form.get('folder_name', 'subject_data')}")
+    print(f"Files received: {len(request.files.getlist('files'))}")
+    print(f"Selected metrics: {request.form.get('selected_metrics', '[]')}")
+    print(f"Selected events: {request.form.get('selected_events', '[]')}")
+    print(f"Analysis method: {request.form.get('analysis_method', 'raw')}")
+    print(f"Plot type: {request.form.get('plot_type', 'lineplot')}")
+    print(f"Batch mode: {request.form.get('batch_mode', 'false')}")
+    print(f"Analyze HRV: {request.form.get('analyze_hrv', 'false')}")
+    print(f"Has PsychoPy: {request.form.get('has_psychopy_data', 'false')}")
+    print("="*80 + "\n")
+
     if 'files' not in request.files:
         return jsonify({'error': 'No files uploaded'}), 400
     
@@ -172,6 +190,17 @@ def upload_folder_and_analyze():
     if batch_mode:
         selected_subjects = json.loads(request.form.get('selected_subjects', '[]'))
     
+    # Parse PsychoPy data
+    has_psychopy_data = request.form.get('has_psychopy_data', 'false') == 'true'
+    psychopy_configs = {}
+    if has_psychopy_data:
+        psychopy_configs_json = request.form.get('psychopy_configs', '{}')
+        try:
+            psychopy_configs = json.loads(psychopy_configs_json)
+            print(f"✓ Parsed PsychoPy configs for {len(psychopy_configs)} subjects")
+        except json.JSONDecodeError as e:
+            print(f"⚠️ Failed to parse PsychoPy configs: {e}")
+
     print(f"\n{'='*80}")
     print(f"ANALYSIS REQUEST RECEIVED")
     print(f"{'='*80}")
@@ -228,7 +257,10 @@ def upload_folder_and_analyze():
         file_manifest = {
             'emotibit_files': [],
             'respiration_files': [],
-            'event_markers': None,
+            'event_markers': None,  # Single subject backward compatibility
+            'event_markers_by_subject': {},  # Multi-subject support
+            'psychopy_files': [],  # PsychoPy data files
+            'psychopy_configs': {},  # PsychoPy configurations
             'ser_file': None,
             'other_files': []
         }
@@ -244,37 +276,61 @@ def upload_folder_and_analyze():
             
             filename_lower = file.filename.lower()
             
+            # Extract subject from path (format: root/subject_xxx/...)
+            path_parts = path.split('/')
+            subject_name = path_parts[1] if len(path_parts) >= 3 else None
+            
             if 'emotibit_data' in path.lower():
                 file_manifest['emotibit_files'].append({
                     'filename': file.filename,
                     'path': file_path,
-                    'relative_path': relative_path
+                    'relative_path': relative_path,
+                    'subject': subject_name  # Add subject tracking
                 })
             elif 'respiration_data' in path.lower():
                 file_manifest['respiration_files'].append({
                     'filename': file.filename,
                     'path': file_path,
-                    'relative_path': relative_path
+                    'relative_path': relative_path,
+                    'subject': subject_name
                 })
             elif filename_lower.endswith('_event_markers.csv'):
-                file_manifest['event_markers'] = {
+                # CRITICAL FIX: Support per-subject event markers
+                if batch_mode and subject_name:
+                    file_manifest['event_markers_by_subject'][subject_name] = {
+                        'filename': file.filename,
+                        'path': file_path,
+                        'relative_path': relative_path
+                    }
+                    print(f"  ✓ Event markers for {subject_name}: {file.filename}")
+                else:
+                    # Single subject - backward compatibility
+                    file_manifest['event_markers'] = {
+                        'filename': file.filename,
+                        'path': file_path,
+                        'relative_path': relative_path
+                    }
+            elif 'psychopy_data' in path.lower() and filename_lower.endswith('.csv'):
+                # NEW: Track PsychoPy files
+                print(f"   ✅ CLASSIFIED AS PSYCHOPY FILE")
+                file_manifest['psychopy_files'].append({
                     'filename': file.filename,
                     'path': file_path,
-                    'relative_path': relative_path
-                }
-            elif 'ser' in filename_lower or 'transcription' in filename_lower:
-                file_manifest['ser_file'] = {
-                    'filename': file.filename,
-                    'path': file_path,
-                    'relative_path': relative_path
-                }
+                    'relative_path': relative_path,
+                    'subject': subject_name
+                })
+                print(f"  ✓ PsychoPy file for {subject_name}: {file.filename}")
             else:
+                # ============================================================================
+                # DEBUG: Catch unclassified files
+                # ============================================================================
+                print(f"   ⚠️  UNCLASSIFIED - adding to other_files")
                 file_manifest['other_files'].append({
                     'filename': file.filename,
                     'path': file_path,
                     'relative_path': relative_path
                 })
-        
+
         file_manifest['analysis_config'] = {
             'selected_metrics': selected_metrics,
             'comparison_groups': comparison_groups,
@@ -284,13 +340,50 @@ def upload_folder_and_analyze():
             'selected_subjects': selected_subjects
         }
         
+        # Add PsychoPy configuration to manifest
+        if has_psychopy_data and psychopy_configs:
+            file_manifest['psychopy_configs'] = psychopy_configs
+            print(f"✓ Added PsychoPy configs to manifest")
+
         manifest_path = os.path.join(upload_folder, 'file_manifest.json')
         with open(manifest_path, 'w') as f:
             json.dump(file_manifest, f, indent=2)
         
         print(f"Files organized in: {upload_folder}")
         print(f"Event markers file: {file_manifest['event_markers']}")
+
+        # ============================================================================
+        # VALIDATION: Check analysis method and plot type compatibility
+        # ============================================================================
+        incompatible_combinations = {
+            'mean': ['lineplot', 'scatter'],  # Mean is single value
+            'rmssd': ['poincare'],  # Poincaré is for HRV analysis
+        }
+        
+        if analysis_method in incompatible_combinations:
+            if plot_type in incompatible_combinations[analysis_method]:
+                error_msg = f"Plot type '{plot_type}' is incompatible with analysis method '{analysis_method}'. Please choose a different combination."
+                print(f"❌ VALIDATION ERROR: {error_msg}")
+                return jsonify({'error': error_msg}), 400
+        
+        # ============================================================================
+        # DEBUG: Print manifest summary
+        # ============================================================================
+        print("\n📋 MANIFEST SUMMARY:")
+        print(f"  EmotiBit files: {len(file_manifest['emotibit_files'])}")
+        print(f"  PsychoPy files: {len(file_manifest.get('psychopy_files', []))}")
+        if batch_mode:
+            print(f"  Event markers (by subject): {len(file_manifest.get('event_markers_by_subject', {}))}")
+            for subj, em_file in file_manifest.get('event_markers_by_subject', {}).items():
+                print(f"    - {subj}: {em_file['filename']}")
+        else:
+            em = file_manifest.get('event_markers')
+            print(f"  Event markers: {em['filename'] if em else 'None'}")
+        print()
+        
         print("Running analysis...")
+
+        analysis_type = request.form.get('analysis_type', 'inter')
 
         # Call analysis with all parameters
         results = run_analysis(
@@ -303,7 +396,9 @@ def upload_folder_and_analyze():
             analyze_hrv=analyze_hrv,
             output_folder=OUTPUT_FOLDER,
             batch_mode=batch_mode,
-            selected_subjects=selected_subjects
+            selected_subjects=selected_subjects,
+            psychopy_configs=psychopy_configs,
+            analysis_type=analysis_type
         )
         
         print("Analysis completed successfully")
@@ -971,6 +1066,23 @@ def test_timestamp_matching():
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             file.save(file_path)
             
+            # ============================================================================
+            # DEBUG: Print every file being processed
+            # ============================================================================
+            print(f"\n🔍 Processing file:")
+            print(f"   Filename: {file.filename}")
+            print(f"   Path: {path}")
+            print(f"   Lowercase path: {path.lower()}")
+            print(f"   Has 'psychopy_data': {'psychopy_data' in path.lower()}")
+            print(f"   Ends with .csv: {file.filename.lower().endswith('.csv')}")
+            
+            filename_lower = file.filename.lower()
+            
+            # Extract subject from path (format: root/subject_xxx/...)
+            path_parts = path.split('/')
+            subject_name = path_parts[1] if len(path_parts) >= 3 else None
+            print(f"   Extracted subject: {subject_name}")
+
             filename_lower = file.filename.lower()
             path_depth = len(path.split('/'))
             

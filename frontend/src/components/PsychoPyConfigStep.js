@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 
 function PsychoPyConfigStep({
   psychopyFilesBySubject,
@@ -7,156 +7,261 @@ function PsychoPyConfigStep({
   setPsychopyConfigs
 }) {
   
-  const [expandedFiles, setExpandedFiles] = useState({});
+  const [expandedExperiments, setExpandedExperiments] = useState({});
+  const [includePsychopy, setIncludePsychopy] = useState(false);
+  const [selectedExperimentTypes, setSelectedExperimentTypes] = useState({});
+  const [psychopyMode, setPsychopyMode] = useState('union');
 
-  const toggleFileExpansion = (subject, filename) => {
-    const key = `${subject}-${filename}`;
-    setExpandedFiles(prev => ({
-      ...prev,
-      [key]: !prev[key]
-    }));
+  const deriveExperimentType = (fileData) => {
+    const expName = (fileData?.experiment_name || '').trim();
+    if (expName && expName.toLowerCase() !== 'unknown') return expName;
+    const name = (fileData?.filename || '').toLowerCase();
+    if (name.includes('sart')) return 'SART';
+    if (name.includes('prs')) return 'PRS';
+    const base = (fileData?.filename || '').replace(/\.csv$/i, '');
+    const tokens = base.split(/[_\-\s]+/).filter(Boolean);
+    const candidate = tokens.find(t => /[A-Za-z]{3,}/.test(t)) || tokens[tokens.length - 1] || 'Unknown';
+    return candidate;
   };
 
-  const isFileExpanded = (subject, filename) => {
-    const key = `${subject}-${filename}`;
-    return expandedFiles[key] || false;
-  };
-
-  const updateConfig = (subject, filename, field, value) => {
-    setPsychopyConfigs(prev => ({
-      ...prev,
-      [subject]: {
-        ...prev[subject],
-        [filename]: {
-          ...prev[subject][filename],
-          [field]: value
+  // Build a map of experiment types to subjects/files
+  const experimentTypeMap = useMemo(() => {
+    const map = {};
+    const selectedSubjectsList = Object.keys(selectedSubjects).filter(s => selectedSubjects[s]);
+    
+    selectedSubjectsList.forEach(subject => {
+      const files = psychopyFilesBySubject[subject] || [];
+      files.forEach(fileData => {
+        const expType = deriveExperimentType(fileData);
+        if (!map[expType]) {
+          map[expType] = {
+            subjects: new Set(),
+            filesBySubject: {}
+          };
         }
+        map[expType].subjects.add(subject);
+        if (!map[expType].filesBySubject[subject]) {
+          map[expType].filesBySubject[subject] = [];
+        }
+        map[expType].filesBySubject[subject].push(fileData);
+      });
+    });
+    
+    // Convert sets to arrays for easier rendering
+    Object.keys(map).forEach(expType => {
+      map[expType].subjects = Array.from(map[expType].subjects);
+    });
+    
+    return map;
+  }, [psychopyFilesBySubject, selectedSubjects]);
+
+  // Filter experiment types based on union/intersection mode
+  const availableExperimentTypes = useMemo(() => {
+    const selectedSubjectsList = Object.keys(selectedSubjects).filter(s => selectedSubjects[s]);
+    
+    if (selectedSubjectsList.length === 0) return [];
+    
+    const experimentTypes = Object.keys(experimentTypeMap);
+    
+    if (psychopyMode === 'intersection') {
+      // Only show experiment types that ALL selected subjects have
+      return experimentTypes.filter(expType => {
+        const data = experimentTypeMap[expType];
+        return selectedSubjectsList.every(subject => data.subjects.includes(subject));
+      });
+    } else {
+      // Union: show all
+      return experimentTypes;
+    }
+  }, [experimentTypeMap, psychopyMode, selectedSubjects]);
+
+  // Initialize from existing configs
+  useEffect(() => {
+    const initial = {};
+    Object.keys(experimentTypeMap).forEach(expType => {
+      const data = experimentTypeMap[expType];
+      const firstSubject = data.subjects[0];
+      const firstFile = data.filesBySubject[firstSubject]?.[0];
+      
+      if (firstFile && psychopyConfigs?.[firstSubject]?.[firstFile.filename]?.selected) {
+        initial[expType] = true;
+        setIncludePsychopy(true);
       }
+    });
+    
+    if (Object.keys(initial).length > 0) {
+      setSelectedExperimentTypes(initial);
+    }
+  }, [experimentTypeMap, psychopyConfigs]);
+
+  const toggleExperimentExpansion = (expType) => {
+    setExpandedExperiments(prev => ({
+      ...prev,
+      [expType]: !prev[expType]
     }));
   };
 
-  const addDataColumn = (subject, filename) => {
-    const currentConfig = psychopyConfigs[subject][filename];
-    updateConfig(subject, filename, 'dataColumns', [
+  const isExperimentExpanded = (expType) => {
+    return expandedExperiments[expType] || false;
+  };
+
+  const setExperimentTypeSelected = (expType, selected) => {
+    setSelectedExperimentTypes(prev => ({
+      ...prev,
+      [expType]: selected
+    }));
+    
+    // Update configs for all subjects/files of this experiment type
+    const data = experimentTypeMap[expType];
+    data.subjects.forEach(subject => {
+      const files = data.filesBySubject[subject] || [];
+      files.forEach(fileData => {
+        updateConfig(subject, fileData.filename, 'selected', selected);
+      });
+    });
+  };
+
+  const isExperimentTypeSelected = (expType) => {
+    return !!selectedExperimentTypes[expType];
+  };
+
+  // Get a sample file for showing configuration options
+  const getSampleFile = (expType) => {
+    const data = experimentTypeMap[expType];
+    if (!data) return null;
+    const firstSubject = data.subjects[0];
+    return data.filesBySubject[firstSubject]?.[0];
+  };
+
+  // Get the current config for an experiment type (using first subject's config as template)
+  const getExperimentConfig = (expType) => {
+    const data = experimentTypeMap[expType];
+    if (!data) return getDefaultConfig();
+    
+    const firstSubject = data.subjects[0];
+    const firstFile = data.filesBySubject[firstSubject]?.[0];
+    
+    if (!firstFile) return getDefaultConfig();
+    
+    return psychopyConfigs?.[firstSubject]?.[firstFile.filename] || getDefaultConfig();
+  };
+
+  const getDefaultConfig = () => ({
+    timestampColumn: '',
+    timestampFormat: 'seconds',
+    dataColumns: [{ column: '', displayName: '', dataType: 'continuous', units: '' }],
+    eventSources: [],
+    conditionColumns: [],
+    selected: false
+  });
+
+  // Update config for a specific subject/file
+  const updateConfig = (subject, filename, field, value) => {
+    setPsychopyConfigs(prev => {
+      const prevSubject = prev?.[subject] || {};
+      const prevFileCfg = prevSubject?.[filename] || getDefaultConfig();
+      return {
+        ...prev,
+        [subject]: {
+          ...prevSubject,
+          [filename]: {
+            ...prevFileCfg,
+            [field]: value
+          }
+        }
+      };
+    });
+  };
+
+  // Update config for all files of an experiment type
+  const updateExperimentConfig = (expType, field, value) => {
+    const data = experimentTypeMap[expType];
+    data.subjects.forEach(subject => {
+      const files = data.filesBySubject[subject] || [];
+      files.forEach(fileData => {
+        updateConfig(subject, fileData.filename, field, value);
+      });
+    });
+  };
+
+  const addDataColumn = (expType) => {
+    const currentConfig = getExperimentConfig(expType);
+    updateExperimentConfig(expType, 'dataColumns', [
       ...currentConfig.dataColumns,
-      {
-        column: '',
-        displayName: '',
-        dataType: 'continuous',
-        units: ''
-      }
+      { column: '', displayName: '', dataType: 'continuous', units: '' }
     ]);
   };
 
-  const removeDataColumn = (subject, filename, index) => {
-    const currentConfig = psychopyConfigs[subject][filename];
-    updateConfig(
-      subject,
-      filename,
+  const removeDataColumn = (expType, index) => {
+    const currentConfig = getExperimentConfig(expType);
+    updateExperimentConfig(
+      expType,
       'dataColumns',
       currentConfig.dataColumns.filter((_, i) => i !== index)
     );
   };
 
-  const updateDataColumn = (subject, filename, index, field, value) => {
-    const currentConfig = psychopyConfigs[subject][filename];
+  const updateDataColumn = (expType, index, field, value) => {
+    const currentConfig = getExperimentConfig(expType);
     const updated = [...currentConfig.dataColumns];
     updated[index] = { ...updated[index], [field]: value };
-    updateConfig(subject, filename, 'dataColumns', updated);
+    updateExperimentConfig(expType, 'dataColumns', updated);
   };
 
-  const addEventSource = (subject, filename) => {
-    const currentConfig = psychopyConfigs[subject][filename];
-    updateConfig(subject, filename, 'eventSources', [
+  const addEventSource = (expType) => {
+    const currentConfig = getExperimentConfig(expType);
+    updateExperimentConfig(expType, 'eventSources', [
       ...currentConfig.eventSources,
-      {
-        column: '',
-        labelType: 'direct',
-        customPrefix: ''
-      }
+      { column: '', labelType: 'direct', customPrefix: '' }
     ]);
   };
 
-  const removeEventSource = (subject, filename, index) => {
-    const currentConfig = psychopyConfigs[subject][filename];
-    updateConfig(
-      subject,
-      filename,
+  const removeEventSource = (expType, index) => {
+    const currentConfig = getExperimentConfig(expType);
+    updateExperimentConfig(
+      expType,
       'eventSources',
       currentConfig.eventSources.filter((_, i) => i !== index)
     );
   };
 
-  const updateEventSource = (subject, filename, index, field, value) => {
-    const currentConfig = psychopyConfigs[subject][filename];
+  const updateEventSource = (expType, index, field, value) => {
+    const currentConfig = getExperimentConfig(expType);
     const updated = [...currentConfig.eventSources];
     updated[index] = { ...updated[index], [field]: value };
-    updateConfig(subject, filename, 'eventSources', updated);
+    updateExperimentConfig(expType, 'eventSources', updated);
   };
 
-  const addConditionColumn = (subject, filename) => {
-    const currentConfig = psychopyConfigs[subject][filename];
-    updateConfig(subject, filename, 'conditionColumns', [
+  const addConditionColumn = (expType) => {
+    const currentConfig = getExperimentConfig(expType);
+    updateExperimentConfig(expType, 'conditionColumns', [
       ...currentConfig.conditionColumns,
-      {
-        column: '',
-        labelType: 'direct',
-        customPrefix: ''
-      }
+      { column: '', labelType: 'direct', customPrefix: '' }
     ]);
   };
 
-  const removeConditionColumn = (subject, filename, index) => {
-    const currentConfig = psychopyConfigs[subject][filename];
-    updateConfig(
-      subject,
-      filename,
+  const removeConditionColumn = (expType, index) => {
+    const currentConfig = getExperimentConfig(expType);
+    updateExperimentConfig(
+      expType,
       'conditionColumns',
       currentConfig.conditionColumns.filter((_, i) => i !== index)
     );
   };
 
-  const updateConditionColumn = (subject, filename, index, field, value) => {
-    const currentConfig = psychopyConfigs[subject][filename];
+  const updateConditionColumn = (expType, index, field, value) => {
+    const currentConfig = getExperimentConfig(expType);
     const updated = [...currentConfig.conditionColumns];
     updated[index] = { ...updated[index], [field]: value };
-    updateConfig(subject, filename, 'conditionColumns', updated);
-  };
-  // const updateConditionColumns = (subject, filename, column, isSelected) => {
-  //   const currentConfig = psychopyConfigs[subject][filename];
-  //   const currentColumns = currentConfig.conditionColumns || [];
-    
-  //   if (isSelected) {
-  //     // Add column if not already present
-  //     if (!currentColumns.includes(column)) {
-  //       updateConfig(subject, filename, 'conditionColumns', [...currentColumns, column]);
-  //     }
-  //   } else {
-  //     // Remove column
-  //     updateConfig(subject, filename, 'conditionColumns', currentColumns.filter(c => c !== column));
-  //   }
-  // };
-
-  const getFileData = (subject, filename) => {
-    const subjectFiles = psychopyFilesBySubject[subject] || [];
-    return subjectFiles.find(f => f.filename === filename);
+    updateExperimentConfig(expType, 'conditionColumns', updated);
   };
 
-  // const getNumericColumns = (subject, filename) => {
-  //   const fileData = getFileData(subject, filename);
-  //   if (!fileData) return [];
-    
-  //   return fileData.columns.filter((col, idx) => 
-  //     fileData.column_types[idx] === 'numeric'
-  //   );
-  // };
-
-  const getUniqueValues = (subject, filename, column) => {
-    const fileData = getFileData(subject, filename);
-    if (!fileData || !fileData.sample_data || fileData.sample_data.length === 0) return [];
+  const getUniqueValues = (expType, column) => {
+    const sampleFile = getSampleFile(expType);
+    if (!sampleFile || !sampleFile.sample_data || sampleFile.sample_data.length === 0) return [];
     
     const values = new Set();
-    fileData.sample_data.forEach(row => {
+    sampleFile.sample_data.forEach(row => {
       if (row[column] !== undefined && row[column] !== null && row[column] !== '') {
         values.add(String(row[column]));
       }
@@ -164,27 +269,6 @@ function PsychoPyConfigStep({
     return Array.from(values).slice(0, 5);
   };
 
-  // const getConditionCandidates = (subject, filename) => {
-  //   const fileData = getFileData(subject, filename);
-  //   if (!fileData) return [];
-    
-  //   const candidates = [];
-  //   fileData.columns.forEach((col, idx) => {
-  //     const uniqueValues = getUniqueValues(subject, filename, col);
-  //     // Only show columns with 2-10 unique values as potential conditions
-  //     if (uniqueValues.length >= 2 && uniqueValues.length <= 10) {
-  //       candidates.push({
-  //         column: col,
-  //         valueCount: uniqueValues.length,
-  //         sampleValues: uniqueValues
-  //       });
-  //     }
-  //   });
-    
-  //   return candidates;
-  // };
-
-  // Get selected subjects that have PsychoPy data
   const selectedSubjectsWithPsychopy = Object.keys(selectedSubjects)
     .filter(s => selectedSubjects[s] && psychopyFilesBySubject[s]);
 
@@ -203,384 +287,439 @@ function PsychoPyConfigStep({
     <div className="wizard-section psychopy-config-section">
       <h3 className="wizard-section-title">PsychoPy Data Configuration</h3>
       <p className="wizard-section-description">
-        Configure how to interpret your PsychoPy CSV files for analysis. Click on each file to expand and configure it.
+        Configure how to interpret your PsychoPy CSV files for analysis. Select experiment types and configure them once to apply to all subjects.
       </p>
 
-      {selectedSubjectsWithPsychopy.map(subject => {
-        const files = psychopyFilesBySubject[subject] || [];
-        
-        return (
-          <div key={subject} className="psychopy-subject-section">
-            <h4 className="psychopy-subject-title">
-              📁 Subject: {subject} ({files.length} file{files.length !== 1 ? 's' : ''})
-            </h4>
+      {/* Include PsychoPy files toggle */}
+      <div className="psychopy-include-toggle">
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={includePsychopy}
+            onChange={(e) => setIncludePsychopy(e.target.checked)}
+          />
+          <span>Include PsychoPy files</span>
+        </label>
+      </div>
+
+      {includePsychopy && (
+        <>
+          {/* Union/Intersection Mode Toggle */}
+          {selectedSubjectsWithPsychopy.length > 1 && (
+            <div className="psychopy-mode-toggle">
+              <label className="mode-option">
+                <input
+                  type="radio"
+                  name="psychopyMode"
+                  value="union"
+                  checked={psychopyMode === 'union'}
+                  onChange={(e) => setPsychopyMode(e.target.value)}
+                />
+                <span>Union (all experiment types)</span>
+              </label>
+              <label className="mode-option">
+                <input
+                  type="radio"
+                  name="psychopyMode"
+                  value="intersection"
+                  checked={psychopyMode === 'intersection'}
+                  onChange={(e) => setPsychopyMode(e.target.value)}
+                />
+                <span>Intersection (common only)</span>
+              </label>
+            </div>
+          )}
+
+          {/* Experiment Type Selection */}
+          <div className="psychopy-selection-panel">
+            <h4 className="selection-title">Select Experiment Types to Include</h4>
             
-            {files.map(fileData => {
-              const isExpanded = isFileExpanded(subject, fileData.filename);
-              const config = psychopyConfigs[subject]?.[fileData.filename] || {
-                timestampColumn: '',
-                timestampFormat: 'seconds',
-                dataColumns: [{column: '', displayName: '', dataType: 'continuous', units: ''}],
-                eventSources: [],
-                conditionColumns: []
-              };
-              
-              return (
-                <div key={fileData.filename} className="psychopy-file-card">
-                  <div 
-                    className="psychopy-file-header"
-                    onClick={() => toggleFileExpansion(subject, fileData.filename)}
-                  >
-                    <span className="psychopy-file-expand-icon">
-                      {isExpanded ? '▼' : '▶'}
-                    </span>
-                    <div className="psychopy-file-info">
-                      <span className="psychopy-filename">{fileData.filename}</span>
-                      <span className="psychopy-experiment-name">
-                        Experiment: {fileData.experiment_name}
-                      </span>
-                      <span className="psychopy-file-stats">
-                        {fileData.columns.length} columns, {fileData.row_count} rows
-                      </span>
-                    </div>
-                    <div className="psychopy-config-status">
-                      {config.timestampColumn && config.dataColumns.some(dc => dc.column) ? (
-                        <span className="status-configured">✓ Configured</span>
-                      ) : (
-                        <span className="status-not-configured">⚠ Not configured</span>
-                      )}
-                    </div>
-                  </div>
-
-                  {isExpanded && (
-                    <div className="psychopy-file-content">
-                      {/* Timestamp Configuration */}
-                      <div className="config-subsection">
-                        <h5 className="subsection-title">1. Select Timestamp Column (Required)</h5>
-                        <p className="subsection-description">
-                          Choose the column that contains timing information.
-                        </p>
-                        
-                        <select
-                          value={config.timestampColumn}
-                          onChange={(e) => updateConfig(subject, fileData.filename, 'timestampColumn', e.target.value)}
-                          className="psychopy-select"
-                        >
-                          <option value="">Select timestamp column...</option>
-                          {fileData.columns.map(col => (
-                            <option key={col} value={col}>{col}</option>
-                          ))}
-                        </select>
-
-                        {config.timestampColumn && (
-                          <div className="timestamp-format-selection">
-                            <label className="format-label">Timestamp Format:</label>
-                            <div className="format-options">
-                              <label className="format-option">
-                                <input
-                                  type="radio"
-                                  name={`timestampFormat-${subject}-${fileData.filename}`}
-                                  value="seconds"
-                                  checked={config.timestampFormat === 'seconds'}
-                                  onChange={(e) => updateConfig(subject, fileData.filename, 'timestampFormat', e.target.value)}
-                                />
-                                <span>Seconds since experiment start</span>
-                              </label>
-                              <label className="format-option">
-                                <input
-                                  type="radio"
-                                  name={`timestampFormat-${subject}-${fileData.filename}`}
-                                  value="milliseconds"
-                                  checked={config.timestampFormat === 'milliseconds'}
-                                  onChange={(e) => updateConfig(subject, fileData.filename, 'timestampFormat', e.target.value)}
-                                />
-                                <span>Milliseconds since experiment start</span>
-                              </label>
-                              <label className="format-option">
-                                <input
-                                  type="radio"
-                                  name={`timestampFormat-${subject}-${fileData.filename}`}
-                                  value="unix"
-                                  checked={config.timestampFormat === 'unix'}
-                                  onChange={(e) => updateConfig(subject, fileData.filename, 'timestampFormat', e.target.value)}
-                                />
-                                <span>Unix timestamp</span>
-                              </label>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Data Columns Configuration */}
-                      <div className="config-subsection">
-                        <h5 className="subsection-title">2. Select Data Columns (Required)</h5>
-                        <p className="subsection-description">
-                          Choose columns containing measurements to visualize and analyze.
-                        </p>
-
-                        <div className="data-columns-list">
-                          {config.dataColumns.map((dataCol, idx) => (
-                            <div key={idx} className="data-column-config">
-                              <div className="data-column-row">
-                                <select
-                                  value={dataCol.column}
-                                  onChange={(e) => updateDataColumn(subject, fileData.filename, idx, 'column', e.target.value)}
-                                  className="data-column-select"
-                                >
-                                  <option value="">Select column...</option>
-                                  {fileData.columns.map(col => (
-                                    <option key={col} value={col}>{col}</option>
-                                  ))}
-                                </select>
-
-                                <input
-                                  type="text"
-                                  value={dataCol.displayName}
-                                  onChange={(e) => updateDataColumn(subject, fileData.filename, idx, 'displayName', e.target.value)}
-                                  placeholder="Display name"
-                                  className="display-name-input"
-                                />
-
-                                {/* <select
-                                  value={dataCol.dataType}
-                                  onChange={(e) => updateDataColumn(subject, fileData.filename, idx, 'dataType', e.target.value)}
-                                  className="data-type-select"
-                                >
-                                  <option value="continuous">Continuous</option>
-                                  <option value="binary">Binary</option>
-                                  <option value="count">Count</option>
-                                </select> */}
-
-                                {/* <input
-                                  type="text"
-                                  value={dataCol.units}
-                                  onChange={(e) => updateDataColumn(subject, fileData.filename, idx, 'units', e.target.value)}
-                                  placeholder="Units"
-                                  className="units-input"
-                                /> */}
-
-                                {config.dataColumns.length > 1 && (
-                                  <button
-                                    onClick={() => removeDataColumn(subject, fileData.filename, idx)}
-                                    className="remove-data-column-btn"
-                                  >
-                                    ×
-                                  </button>
-                                )}
-                              </div>
-
-                              {dataCol.column && (
-                                <div className="column-preview">
-                                  Sample values: {getUniqueValues(subject, fileData.filename, dataCol.column).join(', ') || 'N/A'}
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-
-                        <button 
-                          onClick={() => addDataColumn(subject, fileData.filename)} 
-                          className="add-data-column-btn"
-                        >
-                          + Add Data Column
-                        </button>
-
-                        <div className="selection-summary">
-                          {config.dataColumns.filter(dc => dc.column).length} data column(s) selected
-                        </div>
-                      </div>
-
-                      {/* Event Marker Sources */}
-                      <div className="config-subsection">
-                        <h5 className="subsection-title">3. Map Event Marker Sources (Optional)</h5>
-                        <p className="subsection-description">
-                          Select columns whose values indicate experimental procedures.
-                        </p>
-
-                        <div className="event-sources-list">
-                          {config.eventSources.map((source, idx) => (
-                            <div key={idx} className="event-source-config">
-                              <div className="event-source-row">
-                                <select
-                                  value={source.column}
-                                  onChange={(e) => updateEventSource(subject, fileData.filename, idx, 'column', e.target.value)}
-                                  className="event-source-select"
-                                >
-                                  <option value="">Select column...</option>
-                                  {fileData.columns.map(col => (
-                                    <option key={col} value={col}>{col}</option>
-                                  ))}
-                                </select>
-
-                                <select
-                                  value={source.labelType}
-                                  onChange={(e) => updateEventSource(subject, fileData.filename, idx, 'labelType', e.target.value)}
-                                  className="label-type-select"
-                                >
-                                  <option value="direct">Use values directly</option>
-                                  <option value="prefixed">Add custom prefix</option>
-                                </select>
-
-                                {source.labelType === 'prefixed' && (
-                                  <input
-                                    type="text"
-                                    value={source.customPrefix}
-                                    onChange={(e) => updateEventSource(subject, fileData.filename, idx, 'customPrefix', e.target.value)}
-                                    placeholder="Prefix (e.g., 'task_')"
-                                    className="prefix-input"
-                                  />
-                                )}
-
-                                <button
-                                  onClick={() => removeEventSource(subject, fileData.filename, idx)}
-                                  className="remove-event-source-btn"
-                                >
-                                  ×
-                                </button>
-                              </div>
-
-                              {source.column && (
-                                <div className="column-preview">
-                                  Will create event markers: {getUniqueValues(subject, fileData.filename, source.column).map(v => 
-                                    source.labelType === 'prefixed' && source.customPrefix 
-                                      ? `${source.customPrefix}${v}` 
-                                      : v
-                                  ).join(', ')}
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-
-                        <button 
-                          onClick={() => addEventSource(subject, fileData.filename)} 
-                          className="add-event-source-btn"
-                        >
-                          + Add Event Source
-                        </button>
-                      </div>
-
-                      {/* Condition Columns - Same as Event Sources */}
-                      <div className="config-subsection">
-                        <h5 className="subsection-title">4. Map Condition Columns (Optional)</h5>
-                        <p className="subsection-description">
-                          Select columns representing experimental conditions for grouping/filtering.
-                        </p>
-
-                        <div className="condition-sources-list">
-                          {config.conditionColumns.map((condition, idx) => (
-                            <div key={idx} className="condition-source-config">
-                              <div className="condition-source-row">
-                                <select
-                                  value={condition.column}
-                                  onChange={(e) => updateConditionColumn(subject, fileData.filename, idx, 'column', e.target.value)}
-                                  className="condition-source-select"
-                                >
-                                  <option value="">Select column...</option>
-                                  {fileData.columns.map(col => (
-                                    <option key={col} value={col}>{col}</option>
-                                  ))}
-                                </select>
-
-                                <select
-                                  value={condition.labelType}
-                                  onChange={(e) => updateConditionColumn(subject, fileData.filename, idx, 'labelType', e.target.value)}
-                                  className="label-type-select"
-                                >
-                                  <option value="direct">Use values directly</option>
-                                  <option value="prefixed">Add custom prefix</option>
-                                </select>
-
-                                {condition.labelType === 'prefixed' && (
-                                  <input
-                                    type="text"
-                                    value={condition.customPrefix}
-                                    onChange={(e) => updateConditionColumn(subject, fileData.filename, idx, 'customPrefix', e.target.value)}
-                                    placeholder="Prefix (e.g., 'cond_')"
-                                    className="prefix-input"
-                                  />
-                                )}
-
-                                <button
-                                  onClick={() => removeConditionColumn(subject, fileData.filename, idx)}
-                                  className="remove-condition-source-btn"
-                                >
-                                  ×
-                                </button>
-                              </div>
-
-                              {condition.column && (
-                                <div className="column-preview">
-                                  Will create conditions: {getUniqueValues(subject, fileData.filename, condition.column).map(v => 
-                                    condition.labelType === 'prefixed' && condition.customPrefix 
-                                      ? `${condition.customPrefix}${v}` 
-                                      : v
-                                  ).join(', ')}
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-
-                        <button 
-                          onClick={() => addConditionColumn(subject, fileData.filename)} 
-                          className="add-condition-source-btn"
-                        >
-                          + Add Condition Column
-                        </button>
-
-                        <div className="selection-summary">
-                          {config.conditionColumns.filter(cc => cc.column).length} condition column(s) selected
-                        </div>
-                      </div>
-
-                      {/* Configuration Summary for this file */}
-                      <div className="file-config-summary-box">
-                        <h5 className="summary-title">File Configuration Summary</h5>
-                        <div className="summary-grid">
-                          <div className="summary-item">
-                            <strong>Timestamp:</strong> {config.timestampColumn || 'Not selected'}
-                            {config.timestampColumn && ` (${config.timestampFormat})`}
-                          </div>
-                          <div className="summary-item">
-                            <strong>Data Columns:</strong> {config.dataColumns.filter(dc => dc.column).length}
-                          </div>
-                          <div className="summary-item">
-                            <strong>Event Sources:</strong> {config.eventSources.filter(es => es.column).length}
-                          </div>
-                          <div className="summary-item">
-                            <strong>Condition Filters:</strong> {(config.conditionColumns || []).length}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
+            <div className="experiment-type-checkboxes">
+              {availableExperimentTypes.length === 0 ? (
+                <div className="no-experiments-message">
+                  No common experiment types found across selected subjects.
                 </div>
-              );
-            })}
+              ) : (
+                availableExperimentTypes.map(expType => {
+                  const data = experimentTypeMap[expType];
+                  const totalSubjects = selectedSubjectsWithPsychopy.length;
+                  const availableForSubjects = data.subjects.length;
+                  
+                  return (
+                    <label key={expType} className="experiment-checkbox-item">
+                      <input
+                        type="checkbox"
+                        checked={isExperimentTypeSelected(expType)}
+                        onChange={(e) => setExperimentTypeSelected(expType, e.target.checked)}
+                      />
+                      <span className="experiment-name">{expType}</span>
+                      {psychopyMode === 'union' && totalSubjects > 1 && (
+                        <span className="subject-availability">
+                          ({availableForSubjects}/{totalSubjects} subjects)
+                        </span>
+                      )}
+                    </label>
+                  );
+                })
+              )}
+            </div>
+            
+            <div className="selection-hint">
+              Tip: Selected experiment types will be configured once and applied to all applicable subjects.
+            </div>
           </div>
-        );
-      })}
 
-      {/* Overall Configuration Summary */}
-      <div className="psychopy-overall-summary">
-        <h4 className="summary-title">Overall PsychoPy Configuration</h4>
-        <div className="summary-content">
-          {selectedSubjectsWithPsychopy.map(subject => {
-            const files = psychopyFilesBySubject[subject] || [];
-            const configuredCount = files.filter(f => {
-              const config = psychopyConfigs[subject]?.[f.filename];
-              return config?.timestampColumn && config?.dataColumns.some(dc => dc.column);
-            }).length;
+          {/* Configuration for Selected Experiment Types */}
+          {Object.keys(selectedExperimentTypes).filter(exp => selectedExperimentTypes[exp]).map(expType => {
+            const isExpanded = isExperimentExpanded(expType);
+            const config = getExperimentConfig(expType);
+            const sampleFile = getSampleFile(expType);
+            const data = experimentTypeMap[expType];
+            
+            if (!sampleFile) return null;
             
             return (
-              <div key={subject} className="subject-summary-item">
-                <strong>{subject}:</strong> {configuredCount} of {files.length} file(s) configured
+              <div key={expType} className="psychopy-experiment-card">
+                <div 
+                  className="psychopy-experiment-header"
+                  onClick={() => toggleExperimentExpansion(expType)}
+                >
+                  <span className="psychopy-experiment-expand-icon">
+                    {isExpanded ? '▼' : '▶'}
+                  </span>
+                  <div className="psychopy-experiment-info">
+                    <span className="psychopy-experiment-name">{expType}</span>
+                    <span className="psychopy-experiment-subjects">
+                      Applies to: {data.subjects.join(', ')}
+                    </span>
+                    <span className="psychopy-experiment-stats">
+                      {sampleFile.columns.length} columns, {sampleFile.row_count} rows (sample)
+                    </span>
+                  </div>
+                  <div className="psychopy-config-status">
+                    {config.timestampColumn && config.dataColumns.some(dc => dc.column) ? (
+                      <span className="status-configured">✓ Configured</span>
+                    ) : (
+                      <span className="status-not-configured">⚠ Not configured</span>
+                    )}
+                  </div>
+                </div>
+
+                {isExpanded && (
+                  <div className="psychopy-experiment-content">
+                    {/* Timestamp Configuration */}
+                    <div className="config-subsection">
+                      <h5 className="subsection-title">1. Select Timestamp Column (Required)</h5>
+                      <p className="subsection-description">
+                        Choose the column that contains timing information.
+                      </p>
+                      
+                      <select
+                        value={config.timestampColumn}
+                        onChange={(e) => updateExperimentConfig(expType, 'timestampColumn', e.target.value)}
+                        className="psychopy-select"
+                      >
+                        <option value="">Select timestamp column...</option>
+                        {sampleFile.columns.map(col => (
+                          <option key={col} value={col}>{col}</option>
+                        ))}
+                      </select>
+
+                      {config.timestampColumn && (
+                        <div className="timestamp-format-selection">
+                          <label className="format-label">Timestamp Format:</label>
+                          <div className="format-options">
+                            <label className="format-option">
+                              <input
+                                type="radio"
+                                name={`timestampFormat-${expType}`}
+                                value="seconds"
+                                checked={config.timestampFormat === 'seconds'}
+                                onChange={(e) => updateExperimentConfig(expType, 'timestampFormat', e.target.value)}
+                              />
+                              <span>Seconds since experiment start</span>
+                            </label>
+                            <label className="format-option">
+                              <input
+                                type="radio"
+                                name={`timestampFormat-${expType}`}
+                                value="milliseconds"
+                                checked={config.timestampFormat === 'milliseconds'}
+                                onChange={(e) => updateExperimentConfig(expType, 'timestampFormat', e.target.value)}
+                              />
+                              <span>Milliseconds since experiment start</span>
+                            </label>
+                            <label className="format-option">
+                              <input
+                                type="radio"
+                                name={`timestampFormat-${expType}`}
+                                value="unix"
+                                checked={config.timestampFormat === 'unix'}
+                                onChange={(e) => updateExperimentConfig(expType, 'timestampFormat', e.target.value)}
+                              />
+                              <span>Unix timestamp</span>
+                            </label>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Data Columns Configuration */}
+                    <div className="config-subsection">
+                      <h5 className="subsection-title">2. Select Data Columns (Required)</h5>
+                      <p className="subsection-description">
+                        Choose columns containing measurements to visualize and analyze.
+                      </p>
+
+                      <div className="data-columns-list">
+                        {config.dataColumns.map((dataCol, idx) => (
+                          <div key={idx} className="data-column-config">
+                            <div className="data-column-row">
+                              <select
+                                value={dataCol.column}
+                                onChange={(e) => updateDataColumn(expType, idx, 'column', e.target.value)}
+                                className="data-column-select"
+                              >
+                                <option value="">Select column...</option>
+                                {sampleFile.columns.map(col => (
+                                  <option key={col} value={col}>{col}</option>
+                                ))}
+                              </select>
+
+                              <input
+                                type="text"
+                                value={dataCol.displayName}
+                                onChange={(e) => updateDataColumn(expType, idx, 'displayName', e.target.value)}
+                                placeholder="Display name"
+                                className="display-name-input"
+                              />
+
+                              {config.dataColumns.length > 1 && (
+                                <button
+                                  onClick={() => removeDataColumn(expType, idx)}
+                                  className="remove-data-column-btn"
+                                >
+                                  ×
+                                </button>
+                              )}
+                            </div>
+
+                            {dataCol.column && (
+                              <div className="column-preview">
+                                Sample values: {getUniqueValues(expType, dataCol.column).join(', ') || 'N/A'}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      <button 
+                        onClick={() => addDataColumn(expType)} 
+                        className="add-data-column-btn"
+                      >
+                        + Add Data Column
+                      </button>
+
+                      <div className="selection-summary">
+                        {config.dataColumns.filter(dc => dc.column).length} data column(s) selected
+                      </div>
+                    </div>
+
+                    {/* Event Marker Sources */}
+                    <div className="config-subsection">
+                      <h5 className="subsection-title">3. Map Event Marker Sources (Optional)</h5>
+                      <p className="subsection-description">
+                        Select columns whose values indicate experimental procedures.
+                      </p>
+
+                      <div className="event-sources-list">
+                        {config.eventSources.map((source, idx) => (
+                          <div key={idx} className="event-source-config">
+                            <div className="event-source-row">
+                              <select
+                                value={source.column}
+                                onChange={(e) => updateEventSource(expType, idx, 'column', e.target.value)}
+                                className="event-source-select"
+                              >
+                                <option value="">Select column...</option>
+                                {sampleFile.columns.map(col => (
+                                  <option key={col} value={col}>{col}</option>
+                                ))}
+                              </select>
+
+                              <select
+                                value={source.labelType}
+                                onChange={(e) => updateEventSource(expType, idx, 'labelType', e.target.value)}
+                                className="label-type-select"
+                              >
+                                <option value="direct">Use values directly</option>
+                                <option value="prefixed">Add custom prefix</option>
+                              </select>
+
+                              {source.labelType === 'prefixed' && (
+                                <input
+                                  type="text"
+                                  value={source.customPrefix}
+                                  onChange={(e) => updateEventSource(expType, idx, 'customPrefix', e.target.value)}
+                                  placeholder="Prefix (e.g., 'task_')"
+                                  className="prefix-input"
+                                />
+                              )}
+
+                              <button
+                                onClick={() => removeEventSource(expType, idx)}
+                                className="remove-event-source-btn"
+                              >
+                                ×
+                              </button>
+                            </div>
+
+                            {source.column && (
+                              <div className="column-preview">
+                                Will create event markers: {getUniqueValues(expType, source.column).map(v => 
+                                  source.labelType === 'prefixed' && source.customPrefix 
+                                    ? `${source.customPrefix}${v}` 
+                                    : v
+                                ).join(', ')}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      <button 
+                        onClick={() => addEventSource(expType)} 
+                        className="add-event-source-btn"
+                      >
+                        + Add Event Source
+                      </button>
+                    </div>
+
+                    {/* Condition Columns */}
+                    <div className="config-subsection">
+                      <h5 className="subsection-title">4. Map Condition Columns (Optional)</h5>
+                      <p className="subsection-description">
+                        Select columns representing experimental conditions for grouping/filtering.
+                      </p>
+
+                      <div className="condition-sources-list">
+                        {config.conditionColumns.map((condition, idx) => (
+                          <div key={idx} className="condition-source-config">
+                            <div className="condition-source-row">
+                              <select
+                                value={condition.column}
+                                onChange={(e) => updateConditionColumn(expType, idx, 'column', e.target.value)}
+                                className="condition-source-select"
+                              >
+                                <option value="">Select column...</option>
+                                {sampleFile.columns.map(col => (
+                                  <option key={col} value={col}>{col}</option>
+                                ))}
+                              </select>
+
+                              <select
+                                value={condition.labelType}
+                                onChange={(e) => updateConditionColumn(expType, idx, 'labelType', e.target.value)}
+                                className="label-type-select"
+                              >
+                                <option value="direct">Use values directly</option>
+                                <option value="prefixed">Add custom prefix</option>
+                              </select>
+
+                              {condition.labelType === 'prefixed' && (
+                                <input
+                                  type="text"
+                                  value={condition.customPrefix}
+                                  onChange={(e) => updateConditionColumn(expType, idx, 'customPrefix', e.target.value)}
+                                  placeholder="Prefix (e.g., 'cond_')"
+                                  className="prefix-input"
+                                />
+                              )}
+
+                              <button
+                                onClick={() => removeConditionColumn(expType, idx)}
+                                className="remove-condition-source-btn"
+                              >
+                                ×
+                              </button>
+                            </div>
+
+                            {condition.column && (
+                              <div className="column-preview">
+                                Will create conditions: {getUniqueValues(expType, condition.column).map(v => 
+                                  condition.labelType === 'prefixed' && condition.customPrefix 
+                                    ? `${condition.customPrefix}${v}` 
+                                    : v
+                                ).join(', ')}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      <button 
+                        onClick={() => addConditionColumn(expType)} 
+                        className="add-condition-source-btn"
+                      >
+                        + Add Condition Column
+                      </button>
+
+                      <div className="selection-summary">
+                        {config.conditionColumns.filter(cc => cc.column).length} condition column(s) selected
+                      </div>
+                    </div>
+
+                    {/* Configuration Summary for this experiment type */}
+                    <div className="file-config-summary-box">
+                      <h5 className="summary-title">Configuration Summary</h5>
+                      <div className="summary-grid">
+                        <div className="summary-item">
+                          <strong>Timestamp:</strong> {config.timestampColumn || 'Not selected'}
+                          {config.timestampColumn && ` (${config.timestampFormat})`}
+                        </div>
+                        <div className="summary-item">
+                          <strong>Data Columns:</strong> {config.dataColumns.filter(dc => dc.column).length}
+                        </div>
+                        <div className="summary-item">
+                          <strong>Event Sources:</strong> {config.eventSources.filter(es => es.column).length}
+                        </div>
+                        <div className="summary-item">
+                          <strong>Condition Filters:</strong> {(config.conditionColumns || []).length}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
-        </div>
-      </div>
+
+          {/* Overall Configuration Summary */}
+          <div className="psychopy-overall-summary">
+            <h4 className="summary-title">Overall PsychoPy Configuration</h4>
+            <div className="summary-content">
+              <div className="summary-stats">
+                <strong>Selected experiment types:</strong> {Object.values(selectedExperimentTypes).filter(Boolean).length}
+              </div>
+              {Object.keys(selectedExperimentTypes).filter(exp => selectedExperimentTypes[exp]).map(expType => {
+                const config = getExperimentConfig(expType);
+                const data = experimentTypeMap[expType];
+                const isConfigured = config.timestampColumn && config.dataColumns.some(dc => dc.column);
+                
+                return (
+                  <div key={expType} className="experiment-summary-item">
+                    <strong>{expType}:</strong>
+                    <span> {data.subjects.length} subject(s)</span>
+                    <span className={isConfigured ? "status-ok" : "status-warning"}>
+                      {isConfigured ? " ✓ Configured" : " ⚠ Not configured"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

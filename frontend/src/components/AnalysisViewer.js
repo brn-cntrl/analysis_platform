@@ -217,17 +217,14 @@ function AnalysisViewer() {
             const text = e.target.result;
             const lines = text.split('\n');
             
-            // Parse headers - remove empty headers from trailing commas
+            // Parse headers - filter out empty ones from trailing commas
             const headers = lines[0].split(',')
               .map(h => h.trim())
               .filter(h => h && !h.startsWith('Unnamed:'));
             
-            console.log(`📄 Parsing ${file.name}`);
-            console.log(`Found ${headers.length} headers:`, headers);
-            
-            // Parse sample rows - read up to 10 rows for better sampling
+            // Parse sample rows
             const sampleData = [];
-            for (let i = 1; i < Math.min(11, lines.length); i++) {
+            for (let i = 1; i < Math.min(6, lines.length); i++) {
               if (lines[i].trim()) {
                 const values = lines[i].split(',');
                 const rowObj = {};
@@ -238,78 +235,25 @@ function AnalysisViewer() {
               }
             }
             
-            console.log(`Parsed ${sampleData.length} sample rows`);
-            
-            // Determine column types with better logic
+            // Simple type detection - just check if values are numeric
             const columnTypes = headers.map(header => {
               const sampleValues = sampleData
                 .map(row => row[header])
                 .filter(v => v !== null && v !== '' && v !== undefined);
               
-              console.log(`Column "${header}": ${sampleValues.length} non-empty samples`, sampleValues.slice(0, 3));
+              if (sampleValues.length === 0) return 'string';
               
-              // If no sample data, use column name heuristics
-              if (sampleValues.length === 0) {
-                const lowerHeader = header.toLowerCase();
-                // Check for timing/numeric column indicators in name
-                if (lowerHeader.includes('time') || 
-                    lowerHeader.includes('date') || 
-                    lowerHeader.includes('.t') || 
-                    lowerHeader === 't' ||
-                    lowerHeader.includes('_t') ||
-                    lowerHeader.includes('trial') ||
-                    lowerHeader.includes('session') ||
-                    lowerHeader.includes('rating') ||
-                    lowerHeader.includes('accuracy') ||
-                    lowerHeader.includes('rt') ||
-                    lowerHeader.includes('digit')) {
-                  console.log(`  -> Inferred as NUMERIC (from name)`);
-                  return 'numeric';
-                }
-                console.log(`  -> Defaulting to STRING (no data)`);
-                return 'string';
-              }
-              
-              // Check actual values
+              // Count how many values are numeric
               let numericCount = 0;
-              let datetimeCount = 0;
-              
               for (const value of sampleValues) {
-                const trimmedValue = String(value).trim();
-                
-                // Check if numeric (including floats and negatives)
-                if (!isNaN(parseFloat(trimmedValue)) && isFinite(trimmedValue)) {
+                if (!isNaN(parseFloat(value)) && isFinite(value)) {
                   numericCount++;
                 }
-                // Check if datetime (strict criteria - not emails!)
-                else if ((trimmedValue.match(/^\d{4}-\d{2}-\d{2}$/)) || // YYYY-MM-DD
-                        (trimmedValue.match(/^\d{2}:\d{2}:\d{2}$/)) || // HH:MM:SS
-                        (trimmedValue.match(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/))) { // Full datetime
-                  datetimeCount++;
-                }
               }
               
-              const totalValues = sampleValues.length;
-              const numericRatio = numericCount / totalValues;
-              const datetimeRatio = datetimeCount / totalValues;
-              
-              console.log(`  -> ${numericCount}/${totalValues} numeric (${(numericRatio * 100).toFixed(0)}%)`);
-              
-              if (numericRatio >= 0.5) {
-                console.log(`  -> Classified as NUMERIC`);
-                return 'numeric';
-              }
-              if (datetimeRatio >= 0.5) {
-                console.log(`  -> Classified as DATETIME`);
-                return 'datetime';
-              }
-              
-              console.log(`  -> Classified as STRING`);
-              return 'string';
+              // If most values are numeric, it's numeric
+              return (numericCount / sampleValues.length >= 0.5) ? 'numeric' : 'string';
             });
-            
-            console.log('Final column types:', columnTypes);
-            console.log('Numeric columns:', headers.filter((h, i) => columnTypes[i] === 'numeric'));
             
             resolve({
               columns: headers,
@@ -318,7 +262,6 @@ function AnalysisViewer() {
               row_count: lines.length - 1
             });
           } catch (error) {
-            console.error('Error parsing PsychoPy file:', error);
             reject(error);
           }
         };
@@ -327,19 +270,19 @@ function AnalysisViewer() {
       });
     };
 
-    const formData = new FormData();
-    
-    const emotibitFileList = structure.emotibitFiles.map(f => f.path);
-    formData.append('emotibit_filenames', JSON.stringify(emotibitFileList));
+        const formData = new FormData();
+        
+        const emotibitFileList = structure.emotibitFiles.map(f => f.path);
+        formData.append('emotibit_filenames', JSON.stringify(emotibitFileList));
 
-    const allPaths = structure.allFiles.map(f => f.webkitRelativePath);
-    const subjectFolders = new Set();
-    allPaths.forEach(path => {
-      const parts = path.split('/');
-      if (parts.length >= 3) {
-        subjectFolders.add(parts[1]);
-      }
-    });
+        const allPaths = structure.allFiles.map(f => f.webkitRelativePath);
+        const subjectFolders = new Set();
+        allPaths.forEach(path => {
+          const parts = path.split('/');
+          if (parts.length >= 3) {
+            subjectFolders.add(parts[1]);
+          }
+        });
     
     const detectedSubjects = Array.from(subjectFolders).sort();
     
@@ -387,10 +330,8 @@ function AnalysisViewer() {
       }
     });
 
-    // Wait for all PsychoPy files to be read
     await Promise.all(psychopyPromises);
 
-    // Send metadata instead of files
     if (Object.keys(psychopyMetadata).length > 0) {
       formData.append('psychopy_metadata', JSON.stringify(psychopyMetadata));
     }
@@ -525,7 +466,6 @@ function AnalysisViewer() {
       const subjectData = subjectAvailability[subject];
       let metrics = [...(subjectData.metrics || [])];
       
-      // Check if this subject has PPG files and add HRV
       const subjectHasPPG = subjectData.has_ppg_files || 
                            (fileStructure && fileStructure.hasPPGFiles) ||
                            false;
@@ -556,7 +496,6 @@ function AnalysisViewer() {
 
       let finalMetrics = Array.from(commonMetrics).sort();
       
-      // Check if ALL selected subjects have PPG files, then add HRV to intersection
       const allHavePPG = selectedSubjectsList.every(subject => 
         subjectAvailability[subject]?.has_ppg_files || false
       ) || (fileStructure && fileStructure.hasPPGFiles);
@@ -667,11 +606,14 @@ function AnalysisViewer() {
     }
     
     if (hasPsychoPyFiles) {
-      // Validate PsychoPy configs for selected subjects
+      // Validate PsychoPy configs for selected subjects - ONLY check selected files!
       selectedSubjectsList.forEach(subject => {
         if (subjectsWithPsychopy.includes(subject)) {
           const subjectConfigs = psychopyConfigs[subject] || {};
           Object.entries(subjectConfigs).forEach(([filename, config]) => {
+            // CRITICAL: Only validate files that were explicitly selected
+            if (!config.selected) return;
+            
             if (!config.timestampColumn) {
               issues.push(`PsychoPy (${subject}/${filename}): No timestamp column selected`);
             }
@@ -739,11 +681,12 @@ function AnalysisViewer() {
     const formData = new FormData();
     const filesToUpload = [];
     const pathsToUpload = [];
-    const addedFilePaths = new Set(); 
-    
+    const addedFilePaths = new Set();
+
     if (fileStructure.eventMarkersFiles && fileStructure.eventMarkersFiles.length > 0) {
       fileStructure.eventMarkersFiles.forEach(emFile => {
-        if (!addedFilePaths.has(emFile.path)) {
+        const belongsToSelected = selectedSubjectsList.some(subject => emFile.path.includes(subject));
+        if (belongsToSelected && !addedFilePaths.has(emFile.path)) {
           filesToUpload.push(emFile.file);
           pathsToUpload.push(emFile.path);
           addedFilePaths.add(emFile.path);
@@ -753,32 +696,49 @@ function AnalysisViewer() {
     
     selectedMetricsList.forEach(metric => {
       if (metric === 'HRV') {
-        // For HRV, add PPG files (PI, PR, PG)
         ['PI', 'PR', 'PG'].forEach(ppgType => {
-          const ppgFile = fileStructure.emotibitFiles.find(f => 
-            f.name.includes(`_${ppgType}.csv`)
-          );
-          if (ppgFile && !addedFilePaths.has(ppgFile.path)) {
-            filesToUpload.push(ppgFile.file);
-            pathsToUpload.push(ppgFile.path);
-            addedFilePaths.add(ppgFile.path);
-          }
+          fileStructure.emotibitFiles.forEach(emFile => {
+            const isCorrectType = emFile.name.includes(`_${ppgType}.csv`);
+            const belongsToSelected = selectedSubjectsList.some(subject => emFile.path.includes(subject));
+            if (isCorrectType && belongsToSelected && !addedFilePaths.has(emFile.path)) {
+              filesToUpload.push(emFile.file);
+              pathsToUpload.push(emFile.path);
+              addedFilePaths.add(emFile.path);
+            }
+          });
         });
       } else {
-        // For other metrics, add the specific metric file
-        const metricFile = fileStructure.emotibitFiles.find(f => 
-          f.name.includes(`_${metric}.csv`)
-        );
-        if (metricFile && !addedFilePaths.has(metricFile.path)) {
-          filesToUpload.push(metricFile.file);
-          pathsToUpload.push(metricFile.path);
-          addedFilePaths.add(metricFile.path);
-        }
+        fileStructure.emotibitFiles.forEach(emFile => {
+          const isCorrectType = emFile.name.includes(`_${metric}.csv`);
+          const belongsToSelected = selectedSubjectsList.some(subject => emFile.path.includes(subject));
+          if (isCorrectType && belongsToSelected && !addedFilePaths.has(emFile.path)) {
+            filesToUpload.push(emFile.file);
+            pathsToUpload.push(emFile.path);
+            addedFilePaths.add(emFile.path);
+          }
+        });
       }
     });
 
+    if (hasPsychoPyFiles) {
+      selectedSubjectsList.forEach(subject => {
+        if (subjectsWithPsychopy.includes(subject) && psychopyFilesBySubject[subject]) {
+          psychopyFilesBySubject[subject].forEach(fileData => {
+            const psychopyFile = fileStructure.psychopyFiles.find(f => f.path === fileData.path);
+            if (psychopyFile && !addedFilePaths.has(psychopyFile.path)) {
+              filesToUpload.push(psychopyFile.file);
+              pathsToUpload.push(psychopyFile.path);
+              addedFilePaths.add(psychopyFile.path);
+            }
+          });
+        }
+      });
+      
+      formData.append('psychopy_configs', JSON.stringify(psychopyConfigs));
+      formData.append('has_psychopy_data', 'true');
+    }
+
     console.log(`Uploading ${filesToUpload.length} files for analysis:`, pathsToUpload.map(p => p.split('/').pop()));
-    
     filesToUpload.forEach((file, index) => {
       formData.append('files', file);
       formData.append('paths', pathsToUpload[index]);
@@ -790,6 +750,7 @@ function AnalysisViewer() {
     formData.append('analysis_method', selectedAnalysisMethod);
     formData.append('plot_type', selectedPlotType);
     formData.append('analyze_hrv', JSON.stringify(selectedMetricsList.includes('HRV')));
+    formData.append('analysis_type', analysisType);  
     formData.append('student_id', localStorage.getItem('studentId'));
 
     if (hasPsychoPyFiles) {
@@ -815,6 +776,18 @@ function AnalysisViewer() {
       formData.append('batch_mode', 'true');
     }
 
+    console.log('=== SENDING TO BACKEND ===');
+    console.log('Analysis type:', analysisType);
+    console.log('Batch mode:', selectedSubjectsList.length > 1);
+    console.log('Selected subjects:', selectedSubjectsList);
+    console.log('Selected metrics:', selectedMetricsList);
+    console.log('Selected events:', selectedEvents);
+    console.log('Analysis method:', selectedAnalysisMethod);
+    console.log('Plot type:', selectedPlotType);
+    console.log('Has PsychoPy:', hasPsychoPyFiles);
+    console.log('PsychoPy subjects:', subjectsWithPsychopy.filter(s => selectedSubjects[s]));
+    console.log('==========================');
+    
     try {
       setIsAnalyzing(true);
       setUploadStatus('Uploading folder and running analysis...');
@@ -836,14 +809,13 @@ function AnalysisViewer() {
         console.error('JSON parse error:', parseError);
         console.error('Response text:', responseText);
         setUploadStatus(`Error: Invalid JSON response from server. Check console for details.`);
-        // setLastAnalysisStatus({ success: false, message: 'Invalid server response' });
+  
         return;
       }
       
       if (response.ok) {
         setUploadStatus('Analysis completed successfully!');
         setResults(data.results);
-        // setLastAnalysisStatus({ success: true, message: 'Analysis completed successfully!' });
 
         sessionStorage.setItem('analysisResults', JSON.stringify(data.results));
 
@@ -854,12 +826,11 @@ function AnalysisViewer() {
         }
       } else {
         setUploadStatus(`Error: ${data.error}`);
-        // setLastAnalysisStatus({ success: false, message: data.error });
       }
     } catch (error) {
       console.error('Fetch error:', error);
       setUploadStatus(`Error: ${error.message}`);
-      // setLastAnalysisStatus({ success: false, message: error.message });
+
     } finally {
       setIsAnalyzing(false);
     }
@@ -1172,12 +1143,6 @@ function AnalysisViewer() {
                 {uploadStatus}
               </div>
             )}
-
-            {/* {lastAnalysisStatus && (
-              <div className={`analysis-status ${lastAnalysisStatus.success ? 'success' : 'error'}`}>
-                {lastAnalysisStatus.success ? '✅' : '❌'} {lastAnalysisStatus.message}
-              </div>
-            )} */}
 
             {results && (
               <div className="results-redirect-section">
@@ -1653,7 +1618,6 @@ function AnalysisViewer() {
 
               {wizardStep === (hasPsychoPyFiles ? 8 : 7) && (
                 <div className="wizard-section wizard-final">
-                  {/* <h3 className="wizard-section-title">Run Analysis</h3> */}
                   <p className="wizard-section-description">
                     Click the button below to start processing your data. This may take a few moments.
                   </p>

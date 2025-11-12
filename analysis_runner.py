@@ -31,7 +31,8 @@ from plot_generator import (
 
 def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups, 
                  analysis_method='raw', plot_type='lineplot', analyze_hrv=False, 
-                 output_folder='data/outputs', batch_mode=False, selected_subjects=None):
+                 output_folder='data/outputs', batch_mode=False, selected_subjects=None,
+                 psychopy_configs=None, analysis_type='inter'):  
     """
     Main entry point for analysis.
     
@@ -73,14 +74,24 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
     print("="*80)
     print(f"Subject folder: {os.path.basename(upload_folder)}")
     print(f"EmotiBit files: {len(manifest.get('emotibit_files', []))}")
-    print(f"Event markers: {'Yes' if manifest.get('event_markers') else 'No'}")
+    
+    # Event markers status
+    if batch_mode:
+        em_count = len(manifest.get('event_markers_by_subject', {}))
+        print(f"Event markers: {em_count} subjects")
+    else:
+        print(f"Event markers: {'Yes' if manifest.get('event_markers') else 'No'}")
+    
+    print(f"PsychoPy files: {len(manifest.get('psychopy_files', []))}")
     print(f"Selected metrics: {selected_metrics}")
     print(f"Comparison groups: {len(comparison_groups)}")
     print(f"Analysis method: {analysis_method}")
     print(f"Plot type: {plot_type}")
     print(f"Batch mode: {batch_mode}")
+
     if batch_mode and selected_subjects:
         print(f"Selected subjects: {selected_subjects}")
+
     print("="*80 + "\n")
     
     if len(comparison_groups) < 1:
@@ -90,9 +101,22 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
     # Load event markers
     print("1. LOADING EVENT MARKERS")
     print("-" * 80)
-    
+
+    df_markers = None
+
     try:
-        if manifest.get('event_markers'):
+        # In batch mode, event markers are loaded per-subject during analysis
+        if batch_mode:
+            print(f"✓ Batch mode: Event markers will be loaded per-subject")
+            em_count = len(manifest.get('event_markers_by_subject', {}))
+            print(f"  {em_count} subject(s) have event markers")
+            
+            # Set df_markers to a placeholder so analysis proceeds
+            # Actual loading happens in analyze_metric_multi_subject()
+            df_markers = True  # Truthy value to pass checks
+            
+        # Single subject mode: load event markers normally
+        elif manifest.get('event_markers'):
             event_markers_path = manifest['event_markers']['path']
             print(f"Loading from: {event_markers_path}")
             
@@ -118,7 +142,7 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
         print(f"ERROR: {error_msg}")
         results['errors'].append(error_msg)
         df_markers = None
-    
+
     print()
     
     # Analyze HRV if requested
@@ -151,9 +175,15 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
         print(f"3. ANALYZING SELECTED METRICS (Method: {get_method_label(analysis_method)})")
         print("-" * 80)
         
+        # Synchronize HRV flag with selected metrics
+        if 'HRV' in selected_metrics and not analyze_hrv:
+            print("  ℹ️  HRV detected in metrics list - enabling HRV analysis")
+            analyze_hrv = True
+        
         for metric in selected_metrics:
             if metric == 'HRV':
                 # HRV is handled separately above
+                print(f"\n  ⏭️  Skipping HRV (handled in dedicated HRV analysis section)")
                 continue
                 
             print(f"\nAnalyzing metric: {metric}")
@@ -161,24 +191,91 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
             
             try:
                 # ═══════════════════════════════════════════════════════════
-                # MULTI-SUBJECT BATCH MODE
+                # MULTI-SUBJECT HANDLING
                 # ═══════════════════════════════════════════════════════════
                 if batch_mode and selected_subjects and len(selected_subjects) > 1:
-                    print(f"  🔄 Multi-subject analysis: {len(selected_subjects)} subjects")
                     
-                    metric_results, metric_plots = analyze_metric_multi_subject(
-                        manifest,
-                        selected_subjects,
-                        comparison_groups,
-                        metric,
-                        analysis_method,
-                        plot_type,
-                        output_folder
-                    )
+                    # INTRA-SUBJECT: Compare subjects together
+                    if analysis_type == 'intra':
+                        print(f"  🔄 Intra-subject comparison: {len(selected_subjects)} subjects")
+                        
+                        metric_results, metric_plots = analyze_metric_multi_subject(
+                            manifest,
+                            selected_subjects,
+                            comparison_groups,
+                            metric,
+                            analysis_method,
+                            plot_type,
+                            output_folder
+                        )
+                        
+                        if metric_results:
+                            results['analysis'][metric] = metric_results
+                            results['plots'].extend(metric_plots)
                     
-                    if metric_results:
-                        results['analysis'][metric] = metric_results
-                        results['plots'].extend(metric_plots)
+                    # INTER-SUBJECT: Analyze each subject separately
+                    else:
+                        print(f"  📊 Inter-subject analysis: {len(selected_subjects)} subjects")
+                        print(f"  Running single-subject analysis for each subject...\n")
+                        
+                        for subject in selected_subjects:
+                            print(f"  {'='*60}")
+                            print(f"  Subject: {subject}")
+                            print(f"  {'='*60}")
+                            
+                            # Get files for this subject
+                            subject_files = get_subject_files(manifest, subject)
+                            
+                            if not subject_files['event_markers']:
+                                print(f"    ⚠ No event markers - skipping")
+                                continue
+                            
+                            # Load event markers for this subject
+                            em_path = subject_files['event_markers']['path']
+                            print(f"  Loading event markers: {os.path.basename(em_path)}")
+                            df_subject_markers = pd.read_csv(em_path)
+                            df_subject_markers = prepare_event_markers_timestamps(df_subject_markers)
+                            
+                            # Find metric file for this subject
+                            metric_file = find_metric_file_for_subject(subject_files, metric)
+                            if not metric_file:
+                                print(f"    ⚠ No {metric} file found - skipping")
+                                continue
+                            
+                            # Run single-subject analysis
+                            try:
+                                # Create subject-specific suffix for unique filenames
+                                subject_short = subject[:30]  # First 30 chars to keep filename reasonable
+
+                                metric_results, metric_plots = analyze_metric(
+                                    metric_file,
+                                    df_subject_markers,
+                                    comparison_groups,
+                                    metric,
+                                    analysis_method,
+                                    plot_type,
+                                    output_folder,
+                                    subject_suffix=f"_{subject_short}",
+                                    subject_label=subject
+                                )
+                                                                
+                                if metric_results:
+                                    # Initialize metric dict if needed
+                                    if metric not in results['analysis']:
+                                        results['analysis'][metric] = {}
+                                    
+                                    # Store results with subject prefix for each group
+                                    for group_label, stats in metric_results.items():
+                                        composite_key = f"{subject} - {group_label}"
+                                        results['analysis'][metric][composite_key] = stats
+                                    
+                                    results['plots'].extend(metric_plots)
+                                    
+                            except Exception as e:
+                                print(f"    ⚠ Error analyzing subject: {e}")
+                                continue
+                            
+                            print()  # Blank line between subjects
                 
                 # ═══════════════════════════════════════════════════════════
                 # SINGLE SUBJECT MODE (ORIGINAL LOGIC)
@@ -186,12 +283,55 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
                 else:
                     print(f"  📊 Single subject analysis")
                     
-                    metric_file = None
-                    for emotibit_file in manifest['emotibit_files']:
-                        if f'_{metric}.csv' in emotibit_file['filename']:
-                            metric_file = emotibit_file['path']
-                            break
-                    
+                    # CRITICAL FIX: Get the correct subject from event markers path
+                    event_markers_file = manifest.get('event_markers')
+                    if event_markers_file:
+                        # Extract subject from event markers path
+                        em_path_parts = event_markers_file.get('path', '').split('/')
+                        subject_from_em = em_path_parts[-2] if len(em_path_parts) >= 2 else None
+                        print(f"  Subject from event markers: {subject_from_em}")
+                        
+                        # DEBUG: Show all available EmotiBit files
+                        print(f"\n  Available EmotiBit files:")
+                        for idx, eb_file in enumerate(manifest['emotibit_files']):
+                            print(f"    [{idx}] {eb_file.get('filename', 'NO_FILENAME')}")
+                            print(f"        Path: {eb_file.get('path', 'NO_PATH')}")
+                            print(f"        Subject field: {eb_file.get('subject', 'NO_SUBJECT_FIELD')}")
+                        print()
+                        
+                        # Find metric file for the same subject
+                        metric_file = None
+                        for emotibit_file in manifest['emotibit_files']:
+                            if f'_{metric}.csv' in emotibit_file['filename']:
+                                # Try multiple matching strategies
+                                file_path = emotibit_file.get('path', '')
+                                file_subject = emotibit_file.get('subject', '')
+                                
+                                print(f"  Checking file: {os.path.basename(emotibit_file['filename'])}")
+                                print(f"    - File subject field: {file_subject}")
+                                print(f"    - Subject in path: {subject_from_em in file_path if subject_from_em else False}")
+                                print(f"    - Subject field match: {file_subject == subject_from_em}")
+                                
+                                # Match by subject field first, then by path
+                                if subject_from_em and (file_subject == subject_from_em or subject_from_em in file_path):
+                                    metric_file = emotibit_file['path']
+                                    print(f"  ✓ Matched metric file to subject: {os.path.basename(metric_file)}")
+                                    break
+                        
+                        # Fallback: if no subject match found, take first (with warning)
+                        if not metric_file:
+                            print(f"  ⚠️ WARNING: Could not match subject, using first {metric} file found")
+                            for emotibit_file in manifest['emotibit_files']:
+                                if f'_{metric}.csv' in emotibit_file['filename']:
+                                    metric_file = emotibit_file['path']
+                                    break
+                    else:
+                        # No event markers - just take first file
+                        for emotibit_file in manifest['emotibit_files']:
+                            if f'_{metric}.csv' in emotibit_file['filename']:
+                                metric_file = emotibit_file['path']
+                                break
+                                    
                     if not metric_file:
                         print(f"  ⚠ Warning: File for metric {metric} not found - skipping")
                         continue
@@ -245,7 +385,7 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
 
 
 def analyze_metric(metric_file, df_markers, comparison_groups, metric, 
-                   analysis_method, plot_type, output_folder):
+                   analysis_method, plot_type, output_folder, subject_suffix='', subject_label=''):
     """
     Analyze a single metric with specified method and generate plots.
     
@@ -321,13 +461,16 @@ def analyze_metric(metric_file, df_markers, comparison_groups, metric,
     plots = []
     
     # Main plot based on selected type
+    # Main plot based on selected type
     plot1 = generate_plot(
         group_data_processed, 
         metric_col, 
         metric, 
         plot_type,
         analysis_method,
-        output_folder
+        output_folder,
+        suffix=subject_suffix,
+        subject_label=subject_label
     )
     if plot1:
         plots.append(plot1)
@@ -338,7 +481,9 @@ def analyze_metric(metric_file, df_markers, comparison_groups, metric,
             metric_results, 
             metric, 
             analysis_method,
-            output_folder
+            output_folder,
+            suffix=subject_suffix,
+            subject_label=subject_label
         )
         if plot2:
             plots.append(plot2)
@@ -428,12 +573,16 @@ def analyze_metric_multi_subject(manifest, selected_subjects, comparison_groups,
     
     print(f"\n  Successfully loaded {len(group_data_raw)} subject-event combinations")
     
-    # ═══════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════
     # STEP 2: Apply analysis method to all combinations
-    # ═══════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════
     print(f"\n  Applying analysis method: {get_method_label(analysis_method)}")
-    
-    metric_col = list(group_data_raw.values())[0].columns[-1]  # Last column is metric
+
+    # CRITICAL FIX: Get metric column (column index 1), not AdjustedTimestamp (last column)
+    first_data = list(group_data_raw.values())[0]
+    metric_col = first_data.columns[1] if len(first_data.columns) >= 2 else first_data.columns[-1]
+    print(f"  Using metric column: '{metric_col}'")
+
     group_data_processed = {}
     
     for composite_label, data in group_data_raw.items():

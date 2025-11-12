@@ -204,41 +204,56 @@ def get_subject_files(manifest, subject_name):
         {
             'emotibit_files': [...],
             'event_markers': {...},
-            'respiration_files': [...]
+            'respiration_files': [],
+            'psychopy_files': []
         }
     """
     subject_files = {
         'emotibit_files': [],
         'event_markers': None,
-        'respiration_files': []
+        'respiration_files': [],
+        'psychopy_files': []  # NEW: Add PsychoPy files
     }
     
     # Filter emotibit files for this subject
     for emotibit_file in manifest.get('emotibit_files', []):
-        if subject_name in emotibit_file['path']:
+        # Check both 'subject' key and path-based matching
+        if (emotibit_file.get('subject') == subject_name or 
+            subject_name in emotibit_file.get('path', '')):
             subject_files['emotibit_files'].append(emotibit_file)
     
-    # Find event markers for this subject
-    # Check if manifest has single event_markers or multiple event_markers (batch)
-    if manifest.get('event_markers'):
-        # Single event markers file
-        if subject_name in manifest['event_markers']['path']:
-            subject_files['event_markers'] = manifest['event_markers']
+    # CRITICAL FIX: Find event markers for this subject
+    # Priority 1: Check per-subject event markers (batch mode)
+    if 'event_markers_by_subject' in manifest:
+        subject_files['event_markers'] = manifest['event_markers_by_subject'].get(subject_name)
+        if subject_files['event_markers']:
+            print(f"  ✓ Found event markers for {subject_name} (batch mode)")
     
-    # If we have a list of event marker files (shouldn't happen with current route, but just in case)
-    if 'event_markers_files' in manifest:
-        for em_file in manifest['event_markers_files']:
-            if subject_name in em_file['path']:
-                subject_files['event_markers'] = em_file
-                break
+    # Priority 2: Check single event markers file (backward compatibility)
+    if not subject_files['event_markers'] and manifest.get('event_markers'):
+        if subject_name in manifest['event_markers'].get('path', ''):
+            subject_files['event_markers'] = manifest['event_markers']
+            print(f"  ✓ Found event markers for {subject_name} (single subject mode)")
     
     # Filter respiration files for this subject
     for resp_file in manifest.get('respiration_files', []):
-        if subject_name in resp_file['path']:
+        if (resp_file.get('subject') == subject_name or 
+            subject_name in resp_file.get('path', '')):
             subject_files['respiration_files'].append(resp_file)
     
+    # NEW: Filter PsychoPy files for this subject
+    for psychopy_file in manifest.get('psychopy_files', []):
+        if (psychopy_file.get('subject') == subject_name or 
+            subject_name in psychopy_file.get('path', '')):
+            subject_files['psychopy_files'].append(psychopy_file)
+    
+    # DEBUG: Log what was found
+    print(f"\n  📁 Subject files for {subject_name}:")
+    print(f"    - EmotiBit: {len(subject_files['emotibit_files'])} files")
+    print(f"    - Event markers: {'✓' if subject_files['event_markers'] else '❌ MISSING'}")
+    print(f"    - PsychoPy: {len(subject_files['psychopy_files'])} files")
+    
     return subject_files
-
 
 def find_metric_file_for_subject(subject_files, metric):
     """

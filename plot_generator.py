@@ -12,7 +12,8 @@ import numpy as np
 import os
 
 
-def generate_plot(group_data, metric_col, metric, plot_type, analysis_method, output_folder, suffix=''):
+def generate_plot(group_data, metric_col, metric, plot_type, analysis_method, 
+                  output_folder, suffix='', subject_label=''):
     """
     Generate plot based on specified type.
     
@@ -29,19 +30,19 @@ def generate_plot(group_data, metric_col, metric, plot_type, analysis_method, ou
         Plot info dict or None
     """
     if plot_type == 'lineplot':
-        return generate_lineplot(group_data, metric_col, metric, analysis_method, output_folder, suffix)
+        return generate_lineplot(group_data, metric_col, metric, analysis_method, output_folder, suffix, subject_label)
     elif plot_type == 'boxplot':
-        return generate_boxplot(group_data, metric_col, metric, analysis_method, output_folder, suffix)
+        return generate_boxplot(group_data, metric_col, metric, analysis_method, output_folder, suffix, subject_label)
     elif plot_type == 'scatter':
-        return generate_scatter(group_data, metric_col, metric, analysis_method, output_folder, suffix)
+        return generate_scatter(group_data, metric_col, metric, analysis_method, output_folder, suffix, subject_label)
     elif plot_type == 'poincare':
-        return generate_poincare(group_data, metric_col, metric, analysis_method, output_folder, suffix)
+        return generate_poincare(group_data, metric_col, metric, analysis_method, output_folder, suffix, subject_label)
     else:
         print(f"  ⚠ Warning: Unknown plot type '{plot_type}', defaulting to lineplot")
-        return generate_lineplot(group_data, metric_col, metric, analysis_method, output_folder, suffix)
+        return generate_lineplot(group_data, metric_col, metric, analysis_method, output_folder, suffix, subject_label)
 
 
-def generate_lineplot(group_data, metric_col, metric, analysis_method, output_folder, suffix=''):
+def generate_lineplot(group_data, metric_col, metric, analysis_method, output_folder, suffix='', subject_label=''):    
     """
     Generate line plot (time series) - preserves existing styling.
     """
@@ -86,11 +87,17 @@ def generate_lineplot(group_data, metric_col, metric, analysis_method, output_fo
         ax.grid(True, alpha=0.3, linestyle='--')
         ax.legend(loc='upper left', fontsize=9)
     
-    plt.tight_layout()
-    filename = f'{metric}_lineplot{suffix}.png'
-    plot_path = os.path.join(output_folder, filename)
-    plt.savefig(plot_path, dpi=100, bbox_inches='tight')
-    plt.close()
+        plt.tight_layout()
+        
+        # Add subject label at bottom if provided
+        if subject_label:
+            fig.text(0.5, 0.01, f"Subject: {subject_label}", 
+                    ha='center', fontsize=10, style='italic', transform=fig.transFigure)
+        
+        filename = f'{metric}_lineplot{suffix}.png'
+        plot_path = os.path.join(output_folder, filename)
+        plt.savefig(plot_path, dpi=100, bbox_inches='tight')
+        plt.close()
     
     print(f"    ✓ Saved: {filename}")
     
@@ -102,7 +109,7 @@ def generate_lineplot(group_data, metric_col, metric, analysis_method, output_fo
     }
 
 
-def generate_boxplot(group_data, metric_col, metric, analysis_method, output_folder, suffix=''):
+def generate_boxplot(group_data, metric_col, metric, analysis_method, output_folder, suffix='', subject_label=''):    
     """
     Generate box plot for distribution comparison.
     """
@@ -139,6 +146,12 @@ def generate_boxplot(group_data, metric_col, metric, analysis_method, output_fol
         plt.xticks(rotation=45, ha='right')
     
     plt.tight_layout()
+    
+    # Add subject label at bottom if provided
+    if subject_label:
+        fig.text(0.5, 0.01, f"Subject: {subject_label}", 
+                ha='center', fontsize=10, style='italic', transform=fig.transFigure)
+    
     filename = f'{metric}_boxplot{suffix}.png'
     plot_path = os.path.join(output_folder, filename)
     plt.savefig(plot_path, dpi=100, bbox_inches='tight')
@@ -154,7 +167,7 @@ def generate_boxplot(group_data, metric_col, metric, analysis_method, output_fol
     }
 
 
-def generate_scatter(group_data, metric_col, metric, analysis_method, output_folder, suffix=''):
+def generate_scatter(group_data, metric_col, metric, analysis_method, output_folder, suffix='', subject_label=''):
     """
     Generate scatter plot showing data point distribution.
     """
@@ -194,6 +207,11 @@ def generate_scatter(group_data, metric_col, metric, analysis_method, output_fol
     ax.grid(True, alpha=0.3, linestyle='--')
     plt.tight_layout()
     
+    # Add subject label at bottom if provided
+    if subject_label:
+        fig.text(0.5, 0.01, f"Subject: {subject_label}", 
+                ha='center', fontsize=10, style='italic', transform=fig.transFigure)
+    
     filename = f'{metric}_scatter{suffix}.png'
     plot_path = os.path.join(output_folder, filename)
     plt.savefig(plot_path, dpi=100, bbox_inches='tight')
@@ -209,7 +227,7 @@ def generate_scatter(group_data, metric_col, metric, analysis_method, output_fol
     }
 
 
-def generate_poincare(group_data, metric_col, metric, analysis_method, output_folder, suffix=''):
+def generate_poincare(group_data, metric_col, metric, analysis_method, output_folder, suffix='', subject_label=''):
     """
     Generate Poincaré plot (n vs n+1 values) for variability analysis.
     Particularly useful for HRV and successive difference analysis.
@@ -256,6 +274,11 @@ def generate_poincare(group_data, metric_col, metric, analysis_method, output_fo
     ax.set_aspect('equal')
     plt.tight_layout()
     
+    # Add subject label at bottom if provided
+    if subject_label:
+        fig.text(0.5, 0.01, f"Subject: {subject_label}", 
+                ha='center', fontsize=10, style='italic', transform=fig.transFigure)
+    
     filename = f'{metric}_poincare{suffix}.png'
     plot_path = os.path.join(output_folder, filename)
     plt.savefig(plot_path, dpi=100, bbox_inches='tight')
@@ -271,7 +294,7 @@ def generate_poincare(group_data, metric_col, metric, analysis_method, output_fo
     }
 
 
-def generate_comparison_plot(metric_results, metric, analysis_method, output_folder, suffix=''):
+def generate_comparison_plot(metric_results, metric, analysis_method, output_folder, suffix='', subject_label=''):
     """
     Generate comparison bar chart - preserves existing styling.
     """
@@ -301,6 +324,12 @@ def generate_comparison_plot(metric_results, metric, analysis_method, output_fol
             ha='center', va='bottom', fontsize=9, fontweight='bold')
     
     plt.tight_layout()
+    
+    # Add subject label at bottom if provided
+    if subject_label:
+        fig.text(0.5, 0.01, f"Subject: {subject_label}", 
+                ha='center', fontsize=10, style='italic', transform=fig.transFigure)
+    
     filename = f'{metric}_comparison{suffix}.png'
     plot_path = os.path.join(output_folder, filename)
     plt.savefig(plot_path, dpi=100, bbox_inches='tight')
