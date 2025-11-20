@@ -554,7 +554,12 @@ def scan_folder_data():
                 if len(parts) >= 3:
                     subject = parts[1]
                     if subject in subject_availability:
+                        # Try old format first
                         match = re.search(r'_emotibit_ground_truth_([A-Z0-9%]+)\.csv$', filename)
+                        if not match:
+                            # Try new EmotiBit format: 2-4 uppercase letter codes (HR, EDA, PI, PR, PG, TEMP, etc.)
+                            match = re.search(r'_([A-Z]{2,4})\.csv$', filename)
+                        
                         if match:
                             tag = match.group(1)
                             if tag.lower() not in exclude_tags:
@@ -604,9 +609,23 @@ def scan_folder_data():
 
         else:
             # single subject mode
-            metrics_list = sorted([m for filename in emotibit_filenames
-                                   if (match := re.search(r'_emotibit_ground_truth_([A-Z0-9%]+)\.csv$', filename))
-                                   and (m := match.group(1).lower()) not in exclude_tags])
+            metrics = set()
+            exclude_tags = {'timesyncs', 'timesyncmap'}
+            
+            for filename in emotibit_filenames:
+                # Try old format first
+                match = re.search(r'_emotibit_ground_truth_([A-Z0-9%]+)\.csv$', filename)
+                if not match:
+                    # Try new EmotiBit format: 2-4 uppercase letter codes (HR, EDA, PI, PR, PG, TEMP, etc.)
+                    match = re.search(r'_([A-Z]{2,4})\.csv$', filename)
+                
+                if match:
+                    metric_tag = match.group(1)
+                    if metric_tag.lower() not in exclude_tags:
+                        metrics.add(metric_tag)
+            
+            metrics_list = sorted(list(metrics))
+            print(f"Found {len(metrics_list)} metrics: {metrics_list}")
             
             event_markers = []
             conditions = []

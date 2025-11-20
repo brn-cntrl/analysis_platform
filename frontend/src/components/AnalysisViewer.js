@@ -286,19 +286,21 @@ function AnalysisViewer() {
     
     const detectedSubjects = Array.from(subjectFolders).sort();
     
-    if (detectedSubjects.length > 1) {
+    // ALWAYS send detected subjects, even if there's only 1
+    if (detectedSubjects.length > 0) {
       formData.append('detected_subjects', JSON.stringify(detectedSubjects));
-      setIsBatchMode(true);
       
+      // ALWAYS send event markers in batch format when we have subjects
       structure.eventMarkersFiles.forEach((emFile, index) => {
         formData.append('event_markers_files', emFile.file);
         formData.append('event_markers_paths', emFile.path);
       });
+    }
+    
+    if (detectedSubjects.length > 1) {
+      setIsBatchMode(true);
     } else {
       setIsBatchMode(false);
-      if (structure.eventMarkersFiles && structure.eventMarkersFiles.length > 0) {
-        formData.append('event_markers_file', structure.eventMarkersFiles[0].file);
-      }
     }
 
     const psychopyMetadata = {};
@@ -640,7 +642,7 @@ function AnalysisViewer() {
         });
         
         selectedEvents.forEach((evt, idx) => {
-          if (evt.event && !subjectData.event_markers.includes(evt.event)) {
+          if (evt.event && evt.event !== 'all' && !subjectData.event_markers.includes(evt.event)) {
             issues.push(`Subject ${subject} missing event: ${evt.event}`);
           }
           if (evt.condition !== 'all' && !subjectData.conditions.includes(evt.condition)) {

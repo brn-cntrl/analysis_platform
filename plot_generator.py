@@ -66,8 +66,8 @@ def generate_lineplot(group_data, metric_col, metric, analysis_method, output_fo
         color = colors[idx % len(colors)]
         
         # Plot line and scatter
-        ax.plot(elapsed_seconds, values, color=color, linewidth=1.5, alpha=0.8)
-        ax.scatter(elapsed_seconds, values, color=color, s=12, alpha=0.6)
+        ax.plot(elapsed_seconds, values, color=color, linewidth=1.1, alpha=0.8)
+        # ax.scatter(elapsed_seconds, values, color=color, s=12, alpha=0.6)
         
         # Add mean line
         mean_val = values.mean()

@@ -193,7 +193,7 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
                 # ═══════════════════════════════════════════════════════════
                 # MULTI-SUBJECT HANDLING
                 # ═══════════════════════════════════════════════════════════
-                if batch_mode and selected_subjects and len(selected_subjects) > 1:
+                if batch_mode and selected_subjects and len(selected_subjects) >= 1:
                     
                     # INTRA-SUBJECT: Compare subjects together
                     if analysis_type == 'intra':

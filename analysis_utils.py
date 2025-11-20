@@ -116,22 +116,19 @@ def match_event_markers_to_biometric(event_markers_df, emotibit_df, offset, tole
 def extract_window_data(emotibit_df, event_markers_df, offset, window_config):
     """
     Extract data from emotibit dataframe based on window configuration.
-    
-    Args:
-        emotibit_df: DataFrame with biometric data
-        event_markers_df: DataFrame with event markers
-        offset: Timestamp offset to apply
-        window_config: Dict with 'eventMarker', 'conditionMarker', 'timeWindowType', 'customStart', 'customEnd'
-    
-    Returns:
-        DataFrame with data from the specified window
     """
     emotibit_df = emotibit_df.copy()
     emotibit_df['AdjustedTimestamp'] = emotibit_df['LocalTimestamp'] + offset
     
+    event_marker = window_config['eventMarker']
+    
+    # SPECIAL CASE: "all" means entire experiment duration
+    if event_marker == 'all':
+        print(f"  Analyzing entire experiment duration")
+        return emotibit_df.copy()
+    
     metric_col = emotibit_df.columns[-1]
     
-    event_marker = window_config['eventMarker']
     marker_rows = event_markers_df[event_markers_df['event_marker'] == event_marker]
     
     condition_marker = window_config.get('conditionMarker', '')
