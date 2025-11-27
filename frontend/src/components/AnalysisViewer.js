@@ -35,6 +35,10 @@ function AnalysisViewer() {
   const [subjectsWithPsychopy, setSubjectsWithPsychopy] = useState([]);
   const [psychopyConfigs, setPsychopyConfigs] = useState({});
 
+  const [needsDataParser, setNeedsDataParser] = useState(false);
+  const [subjectsNeedingParser, setSubjectsNeedingParser] = useState([]);
+  const [parserLaunchStatus, setParserLaunchStatus] = useState('');
+
   // // PsychoPy state
   // const [hasPsychoPyFile, setHasPsychoPyFile] = useState(false);
   // const [psychopyFile, setPsychopyFile] = useState(null);
@@ -125,6 +129,26 @@ function AnalysisViewer() {
     setLoginStudentId('');
   };
 
+  const handleLaunchDataParser = async () => {
+    setParserLaunchStatus('Launching DataParser...');
+    
+    try {
+      const response = await fetch('/api/launch-emotibit-parser', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok) {
+        setParserLaunchStatus('✓ DataParser launched! Please parse your files and then re-select the folder.');
+      } else {
+        setParserLaunchStatus(`Error: ${data.error}`);
+      }
+    } catch (error) {
+      setParserLaunchStatus(`Error: ${error.message}`);
+    }
+  };
   const handleFolderSelect = async (e) => {
     const files = Array.from(e.target.files);
     
@@ -189,22 +213,23 @@ function AnalysisViewer() {
     );
 
     console.log('=== Folder Structure Analysis ===');
-    console.log('Total EmotiBit files:', structure.emotibitFiles.length);
-    console.log('EmotiBit filenames:', structure.emotibitFiles.map(f => f.name));
-    console.log('PPG files detected:', structure.hasPPGFiles);
-    console.log('=================================');
+        console.log('=== Folder Structure Analysis ===');
+        console.log('Total EmotiBit files:', structure.emotibitFiles.length);
+        console.log('EmotiBit filenames:', structure.emotibitFiles.map(f => f.name));
+        console.log('PPG files detected:', structure.hasPPGFiles);
+        console.log('=================================');
 
-    setFileStructure(structure);
-    setUploadStatus(`Folder "${folderName}" selected with ${files.length} files`);
+        setFileStructure(structure);
+        setUploadStatus(`Folder "${folderName}" selected with ${files.length} files`);
 
-    await scanFolderData(structure);
-  };
+        await scanFolderData(structure);
+      };
 
-  const scanFolderData = async (structure) => {
-    if (!structure.emotibitFiles || structure.emotibitFiles.length === 0) {
-      setUploadStatus('No EmotiBit files found');
-      return;
-    }
+      const scanFolderData = async (structure) => {
+        if (!structure.emotibitFiles || structure.emotibitFiles.length === 0) {
+          setUploadStatus('No EmotiBit files found');
+          return;
+        }
 
     setIsScanning(true);
     setUploadStatus('Scanning folder data...');
@@ -285,7 +310,7 @@ function AnalysisViewer() {
         });
     
     const detectedSubjects = Array.from(subjectFolders).sort();
-    
+
     // ALWAYS send detected subjects, even if there's only 1
     if (detectedSubjects.length > 0) {
       formData.append('detected_subjects', JSON.stringify(detectedSubjects));
@@ -440,6 +465,65 @@ function AnalysisViewer() {
           setBatchStatusMessage(intersectionMsg);
         }
         setUploadStatus(`Found ${metrics.length} metrics${eventMarkersMsg}${conditionsMsg}${subjectsMsg}${psychopyMsg}`);
+        // Check if any subjects need DataParser
+        if (data.subjects && data.subjects.length > 0) {
+          const subjectsNeedingParserList = [];
+          
+          console.log('=== DETAILED DataParser Detection ===');
+          console.log('Total subjects:', data.subjects);
+          
+          data.subjects.forEach(subject => {
+            console.log(`\n--- Checking subject: ${subject} ---`);
+            
+            const subjectEmotibitFiles = structure.emotibitFiles.filter(f => 
+              f.path.includes(`/${subject}/emotibit_data/`)
+            );
+            
+            console.log(`  Files found:`, subjectEmotibitFiles.length);
+            console.log(`  File names:`, subjectEmotibitFiles.map(f => f.name));
+            
+            const hasNoEmotibitFiles = subjectEmotibitFiles.length === 0;
+            
+            console.log(`  hasNoEmotibitFiles: ${hasNoEmotibitFiles}`);
+            
+            const parsedFileChecks = subjectEmotibitFiles.map(f => {
+              const name = f.name;
+              const isExcluded = name.includes('_ground_truth.csv') || 
+                                name.includes('_biometrics.csv') || 
+                                name.includes('_event_markers.csv') ||
+                                name.endsWith('.h5');
+              const matchesPattern = /_[A-Z]{2,4}\.csv$/.test(name);
+              const isParsed = !isExcluded && matchesPattern;
+              
+              return {
+                name: name,
+                isExcluded: isExcluded,
+                matchesPattern: matchesPattern,
+                isParsed: isParsed
+              };
+            });
+            
+            console.log(`  Parsed file checks:`, parsedFileChecks);
+            
+            const hasParsedFiles = parsedFileChecks.some(check => check.isParsed);
+            console.log(`  hasParsedFiles: ${hasParsedFiles}`);
+            
+            const needsParser = !hasParsedFiles && !hasNoEmotibitFiles;
+            console.log(`  NEEDS PARSER: ${needsParser}`);
+            
+            if (needsParser) {
+              subjectsNeedingParserList.push(subject);
+            }
+          });
+          
+          console.log('\n=== FINAL RESULTS ===');
+          console.log('Subjects needing parser:', subjectsNeedingParserList);
+          console.log('needsDataParser will be set to:', subjectsNeedingParserList.length > 0);
+          console.log('====================\n');
+          
+          setSubjectsNeedingParser(subjectsNeedingParserList);
+          setNeedsDataParser(subjectsNeedingParserList.length > 0);
+        }
       } else {
         setUploadStatus(`Error scanning folder: ${data.error}`);
       }
@@ -1130,7 +1214,36 @@ function AnalysisViewer() {
               </div>
             )}
           </div>
-
+          <div className="parser-prompt-card">
+            {needsDataParser && subjectsNeedingParser.length > 0 ? (
+              <>
+                <p className="parser-prompt-description warning">
+                  ⚠️ The following subject(s) need DataParser processing to generate individual metric files 
+                  (HR, EDA, TEMP, etc.):
+                </p>
+                <div className="subjects-needing-parser">
+                  {subjectsNeedingParser.map(subject => (
+                    <span key={subject} className="subject-badge warning">{subject}</span>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p className="parser-prompt-description">
+                Launch the EmotiBit DataParser to process ground truth files and generate individual metric files.
+              </p>
+            )}
+            <button 
+              onClick={handleLaunchDataParser}
+              className="launch-parser-btn"
+            >
+              Launch DataParser
+            </button>
+            {parserLaunchStatus && (
+              <div className={`parser-status ${parserLaunchStatus.includes('Error') ? 'error' : 'success'}`}>
+                {parserLaunchStatus}
+              </div>
+            )}
+          </div>
           <div className="config-action-area">
             <button 
               onClick={openConfigWizard}

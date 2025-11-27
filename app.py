@@ -9,6 +9,7 @@ import pandas as pd
 import io
 from datetime import datetime
 import numpy as np
+import subprocess
 
 from analysis_utils import (
     prepare_event_markers_timestamps,
@@ -109,44 +110,26 @@ def register():
         'name': full_name
     }), 201
 
+@app.route('/api/launch-emotibit-parser', methods=['POST'])
+def launch_emotibit_parser():
+    try:
+        # TODO This will need to account for windows extenstions when ported
+        executable_path = os.path.join(os.getcwd(), 'executables', 'EmotiBitDataParser.app')
+        subprocess.Popen(['open', executable_path])
+        
+        return jsonify({
+            "success": True, 
+            "message": "EmotiBit DataParser launched successfully"
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "success": False, 
+            "error": str(e)
+        }), 500
+
 @app.route('/api/upload-folder-and-analyze', methods=['POST'])
 def upload_folder_and_analyze():
-    """
-    Handle a multipart/form-data upload of experiment files, organize them into a manifest,
-    and run analysis based on frontend parameters.
-    Expected form fields:
-    - files: one or more uploaded files (required)
-    - paths: list of relative paths corresponding to each uploaded file
-    - student_id: string identifying the student (default: "unknown")
-    - folder_name: target subfolder under UPLOAD_FOLDER (default: "subject_data")
-    - selected_metrics: JSON array of metric names to compute (default: [])
-    - selected_events: JSON array of event configurations used to build comparison_groups (default: [])
-    - analysis_method: string selecting analysis mode (e.g., "raw"; default: "raw")
-    - plot_type: desired plot type (e.g., "lineplot"; default: "lineplot")
-    - analyze_hrv: JSON boolean flag to include HRV analysis (default: false)
-    - batch_mode: "true"/"false" string to enable multi-subject batch processing (default: "false")
-    - selected_subjects: JSON array of subject identifiers (used when batch_mode is true)
-    Behavior:
-    - Validates that files are present and filters uploads via allowed_file().
-    - Saves each uploaded file under UPLOAD_FOLDER/<student_id>/<secure_folder_name>/<relative_path>,
-        creating directories as needed.
-    - Classifies saved files into a file_manifest with keys:
-        - emotibit_files, respiration_files, event_markers, ser_file, other_files
-    - Transforms selected_events into comparison_groups with label, eventMarker, conditionMarker,
-        and a default timeWindowType.
-    - Writes file_manifest to <upload_folder>/file_manifest.json.
-    - Calls run_analysis(...) with full configuration; saves returned results to OUTPUT_FOLDER/results.json.
-    - Updates plot entries in results with URL path "/api/plot/<filename>".
-    - Returns JSON response:
-        - 200: {'message', 'results', 'folder_name'} on success
-        - 400: {'error'} when required upload fields are missing
-        - 500: {'error'} on unexpected exceptions (server-side)
-    Side effects and notes:
-    - Creates directories under UPLOAD_FOLDER and writes manifest and uploaded files to disk.
-    - Writes analysis output to OUTPUT_FOLDER.
-    - Uses run_analysis to perform heavy computation; exceptions from that call are caught and returned as 500.
-    - Prints diagnostic information to stdout for debugging/logging.
-    """
     
     # ============================================================================
     # DEBUG: Log incoming request
