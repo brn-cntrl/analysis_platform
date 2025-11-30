@@ -16,30 +16,20 @@ def generate_plot(group_data, metric_col, metric, plot_type, analysis_method,
                   output_folder, suffix='', subject_label=''):
     """
     Generate plot based on specified type.
-    
-    Args:
-        group_data: Dict mapping group labels to DataFrames
-        metric_col: Name of the column containing metric values
-        metric: Metric name (e.g., 'HR', 'EDA')
-        plot_type: Type of plot ('lineplot', 'boxplot', 'scatter', 'poincare')
-        analysis_method: Analysis method used
-        output_folder: Where to save plots
-        suffix: Optional suffix for filename
-        
-    Returns:
-        Plot info dict or None
     """
     if plot_type == 'lineplot':
-        return generate_lineplot(group_data, metric_col, metric, analysis_method, output_folder, suffix, subject_label)
+        return generate_lineplot(...)
     elif plot_type == 'boxplot':
-        return generate_boxplot(group_data, metric_col, metric, analysis_method, output_folder, suffix, subject_label)
+        return generate_boxplot(...)
     elif plot_type == 'scatter':
-        return generate_scatter(group_data, metric_col, metric, analysis_method, output_folder, suffix, subject_label)
+        return generate_scatter(...)
     elif plot_type == 'poincare':
-        return generate_poincare(group_data, metric_col, metric, analysis_method, output_folder, suffix, subject_label)
+        return generate_poincare(...)
+    elif plot_type == 'barchart':
+        return None  # Handled by generate_comparison_plot
     else:
         print(f"  ⚠ Warning: Unknown plot type '{plot_type}', defaulting to lineplot")
-        return generate_lineplot(group_data, metric_col, metric, analysis_method, output_folder, suffix, subject_label)
+        return generate_lineplot(...)
 
 
 def generate_lineplot(group_data, metric_col, metric, analysis_method, output_folder, suffix='', subject_label=''):    
@@ -60,6 +50,12 @@ def generate_lineplot(group_data, metric_col, metric, analysis_method, output_fo
             continue
         
         timestamps = data['AdjustedTimestamp'].values
+        
+        # Ensure timestamps and values have matching lengths (RMSSD produces N-1 points)
+        min_len = min(len(timestamps), len(values))
+        timestamps = timestamps[:min_len]
+        values = values.iloc[:min_len] if hasattr(values, 'iloc') else values[:min_len]
+        
         start_time = timestamps.min()
         elapsed_seconds = timestamps - start_time
         
@@ -126,10 +122,18 @@ def generate_boxplot(group_data, metric_col, metric, analysis_method, output_fol
         data_arrays.append(values)
     
     # Create box plot
-    bp = ax.boxplot(data_arrays, labels=group_labels, patch_artist=True,
-                    notch=True, showmeans=True,
-                    meanprops=dict(marker='D', markerfacecolor='red', markersize=8),
-                    medianprops=dict(color='black', linewidth=2))
+    try:
+        bp = ax.boxplot(data_arrays, labels=group_labels, patch_artist=True,
+                        notch=True, showmeans=True,
+                        meanprops=dict(marker='D', markerfacecolor='red', markersize=8),
+                        medianprops=dict(color='black', linewidth=2))
+    except ValueError as e:
+        # Fallback to non-notched boxplot if insufficient data
+        print(f"    ⚠ Notched boxplot failed, using standard boxplot: {e}")
+        bp = ax.boxplot(data_arrays, labels=group_labels, patch_artist=True,
+                        notch=False, showmeans=True,
+                        meanprops=dict(marker='D', markerfacecolor='red', markersize=8),
+                        medianprops=dict(color='black', linewidth=2))
     
     # Color the boxes
     for patch, color in zip(bp['boxes'], colors[:len(group_labels)]):
@@ -171,6 +175,11 @@ def generate_scatter(group_data, metric_col, metric, analysis_method, output_fol
     """
     Generate scatter plot showing data point distribution.
     """
+    # Scatter plots require multiple data points - incompatible with mean analysis
+    if analysis_method == 'mean':
+        print(f"    ⚠ Scatter plot requires multiple data points (mean analysis produces single value)")
+        return None
+    
     colors = ['#4CAF50', '#2196F3', '#FF9800', '#9C27B0', '#F44336', 
               '#00BCD4', '#FFEB3B', '#795548', '#607D8B', '#E91E63']
     
