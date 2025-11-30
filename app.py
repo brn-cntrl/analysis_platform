@@ -169,6 +169,11 @@ def upload_folder_and_analyze():
     
     # Multi-subject parameters
     batch_mode = request.form.get('batch_mode', 'false') == 'true'
+
+    # Data cleaning parameters
+    cleaning_enabled = json.loads(request.form.get('cleaning_enabled', 'false'))
+    cleaning_stages = json.loads(request.form.get('cleaning_stages', '{}'))
+
     selected_subjects = []
     if batch_mode:
         selected_subjects = json.loads(request.form.get('selected_subjects', '[]'))
@@ -380,7 +385,9 @@ def upload_folder_and_analyze():
             batch_mode=batch_mode,
             selected_subjects=selected_subjects,
             external_configs=external_configs,
-            analysis_type=analysis_type
+            analysis_type=analysis_type,
+            cleaning_enabled=cleaning_enabled,
+            cleaning_stages=cleaning_stages
         )
         
         print("Analysis completed successfully")

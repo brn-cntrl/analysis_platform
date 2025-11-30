@@ -724,4 +724,4 @@ function ExternalConfigStep({
   );
 }
 
-export default ExternalConfigstep;
+export default ExternalConfigStep;

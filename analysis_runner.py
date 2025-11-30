@@ -32,7 +32,8 @@ from plot_generator import (
 def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups, 
                  analysis_method='raw', plot_type='lineplot', analyze_hrv=False, 
                  output_folder='data/outputs', batch_mode=False, selected_subjects=None,
-                 psychopy_configs=None, analysis_type='inter'):  
+                 external_configs=None, analysis_type='inter', cleaning_enabled=False,
+                 cleaning_stages=None): 
     """
     Main entry point for analysis.
     
@@ -65,7 +66,9 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
             'analysis_method': analysis_method,
             'plot_type': plot_type,
             'batch_mode': batch_mode,
-            'selected_subjects': selected_subjects or []
+            'selected_subjects': selected_subjects or [],
+            'cleaning_enabled': cleaning_enabled,
+            'cleaning_stages': cleaning_stages or {}
         }
     }
     
@@ -82,7 +85,7 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
     else:
         print(f"Event markers: {'Yes' if manifest.get('event_markers') else 'No'}")
     
-    print(f"PsychoPy files: {len(manifest.get('psychopy_files', []))}")
+    print(f"External files: {len(manifest.get('external_files', []))}")
     print(f"Selected metrics: {selected_metrics}")
     print(f"Comparison groups: {len(comparison_groups)}")
     print(f"Analysis method: {analysis_method}")
@@ -206,7 +209,9 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
                             metric,
                             analysis_method,
                             plot_type,
-                            output_folder
+                            output_folder,
+                            cleaning_enabled=cleaning_enabled,
+                            cleaning_stages=cleaning_stages
                         )
                         
                         if metric_results:
@@ -256,7 +261,9 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
                                     plot_type,
                                     output_folder,
                                     subject_suffix=f"_{subject_short}",
-                                    subject_label=subject
+                                    subject_label=subject,
+                                    cleaning_enabled=cleaning_enabled,
+                                    cleaning_stages=cleaning_stages
                                 )
                                                                 
                                 if metric_results:
@@ -358,7 +365,9 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
                         metric,
                         analysis_method,
                         plot_type,
-                        output_folder
+                        output_folder,
+                        cleaning_enabled=cleaning_enabled,
+                        cleaning_stages=cleaning_stages
                     )
                     
                     if metric_results:
@@ -399,7 +408,8 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
 
 
 def analyze_metric(metric_file, df_markers, comparison_groups, metric, 
-                   analysis_method, plot_type, output_folder, subject_suffix='', subject_label=''):
+                   analysis_method, plot_type, output_folder, subject_suffix='', 
+                   subject_label='', cleaning_enabled=False, cleaning_stages=None):
     """
     Analyze a single metric with specified method and generate plots.
     
@@ -418,6 +428,18 @@ def analyze_metric(metric_file, df_markers, comparison_groups, metric,
     print(f"  Loading: {os.path.basename(metric_file)}")
     df_metric = pd.read_csv(metric_file)
     print(f"  ✓ Loaded {df_metric.shape[0]} rows")
+    
+    # Apply data cleaning if enabled
+    if cleaning_enabled:
+        from DataCleaner import BiometricDataCleaner
+        cleaner = BiometricDataCleaner(metric_type=metric)
+        metric_col = df_metric.columns[1]  # Column index 1 is the metric value
+        df_metric = cleaner.clean(
+            df_metric, 
+            metric_col, 
+            timestamp_col='LocalTimestamp',
+            stages=cleaning_stages
+        )
     
     print(f"  Calculating timestamp offset...")
     offset = find_timestamp_offset(df_markers, df_metric)
@@ -510,7 +532,8 @@ def analyze_metric(metric_file, df_markers, comparison_groups, metric,
     return metric_results, plots
 
 def analyze_metric_multi_subject(manifest, selected_subjects, comparison_groups, 
-                                  metric, analysis_method, plot_type, output_folder):
+                                  metric, analysis_method, plot_type, output_folder,
+                                  cleaning_enabled=False, cleaning_stages=None):
     """
     Analyze a metric across multiple subjects (intra-subject analysis).
     Creates subject × event combinations for comparison.
@@ -557,6 +580,20 @@ def analyze_metric_multi_subject(manifest, selected_subjects, comparison_groups,
         
         print(f"    ✓ Loading: {os.path.basename(metric_file)}")
         df_metric = pd.read_csv(metric_file)
+        
+        # Apply data cleaning if enabled
+        if cleaning_enabled:
+            from DataCleaner import BiometricDataCleaner
+            cleaner = BiometricDataCleaner(metric_type=metric)
+            metric_col = df_metric.columns[1]  # Column index 1 is the metric value
+            df_metric = cleaner.clean(
+                df_metric, 
+                metric_col, 
+                timestamp_col='LocalTimestamp',
+                stages=cleaning_stages
+            )
+        
+        # Load event markers for this subject
         
         # Load event markers for this subject
         event_markers_path = subject_files['event_markers']['path']

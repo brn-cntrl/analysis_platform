@@ -52,6 +52,17 @@ function AnalysisViewer() {
   const [configIssues, setConfigIssues] = useState([]);
   // const [lastAnalysisStatus, setLastAnalysisStatus] = useState(null);
 
+  // Data cleaning state
+  const [cleaningEnabled, setCleaningEnabled] = useState(false);
+  const [cleaningStages, setCleaningStages] = useState({
+    remove_invalid: true,
+    remove_physiological_outliers: true,
+    remove_statistical_outliers: false,
+    remove_sudden_changes: true,
+    interpolate: true,
+    smooth: false
+  });
+
   const validateConfiguration = React.useCallback(() => {
     const issues = [];
     
@@ -123,9 +134,9 @@ function AnalysisViewer() {
     console.log('HRV included:', availableMetrics.includes('HRV'));
   }, [availableMetrics]);
 
-  // Validate configuration when reaching review step (step 6)
+  // Validate configuration when reaching review step
   useEffect(() => {
-    if (wizardStep === (hasExternalFiles ? 7 : 6) && showConfigWizard) {
+    if (wizardStep === (hasExternalFiles ? 8 : 7) && showConfigWizard) {
       console.log('Reached review step, validating configuration...');
       console.log('Current state:', {
         selectedSubjects,
@@ -136,6 +147,40 @@ function AnalysisViewer() {
       validateConfiguration();
     }
   }, [wizardStep, showConfigWizard, hasExternalFiles, validateConfiguration, selectedSubjects, selectedMetrics, selectedEvents, subjectAvailability]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (isLoggedIn) {
+        localStorage.clear();
+        
+        e.preventDefault();
+        e.returnValue = ''; 
+        return ''; 
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isLoggedIn]);
+
+  // Prevent accidental navigation within the app
+  useEffect(() => {
+    if (!isLoggedIn) return;
+
+    const handleUnload = () => {
+      localStorage.clear();
+    };
+
+    // Handle browser/tab close
+    window.addEventListener('unload', handleUnload);
+
+    return () => {
+      window.removeEventListener('unload', handleUnload);
+    };
+  }, [isLoggedIn]);
 
   useEffect(() => {
     const incompatibleCombos = {
@@ -708,7 +753,7 @@ function AnalysisViewer() {
   };
 
   const nextWizardStep = () => {
-    const maxStep = hasExternalFiles ? 8 : 7;
+    const maxStep = hasExternalFiles ? 9 : 8;
     if (wizardStep < maxStep) {
       setWizardStep(wizardStep + 1);
     }
@@ -838,6 +883,9 @@ function AnalysisViewer() {
     formData.append('analyze_hrv', JSON.stringify(selectedMetricsList.includes('HRV')));
     formData.append('analysis_type', analysisType);  
     formData.append('student_id', localStorage.getItem('studentId'));
+
+    formData.append('cleaning_enabled', JSON.stringify(cleaningEnabled));
+    formData.append('cleaning_stages', JSON.stringify(cleaningStages));
 
     if (hasExternalFiles) {
       selectedSubjectsList.forEach(subject => {
@@ -1288,7 +1336,7 @@ function AnalysisViewer() {
             </div>
 
             <div className="wizard-breadcrumbs">
-            {['Type', 'Tags', 'Events', 'Conditions', 'Method', 'Plot', ...(hasExternalFiles ? ['External'] : []), 'Review', 'Run'].map((label, idx) => (
+            {['Type', 'Tags', 'Events', 'Conditions', 'Method', 'Plot', 'Cleaning', ...(hasExternalFiles ? ['External'] : []), 'Review', 'Run'].map((label, idx) => (
                 <div
                   key={idx}
                   className={`breadcrumb ${wizardStep === idx ? 'active' : ''} ${wizardStep > idx ? 'completed' : ''}`}
@@ -1715,7 +1763,124 @@ function AnalysisViewer() {
                 </div>
               )}
 
-              {hasExternalFiles && wizardStep === 6 && (
+              {wizardStep === 6 && (
+                <div className="wizard-section">
+                  <h3 className="wizard-section-title">Data Cleaning</h3>
+                  <p className="wizard-section-description">
+                    Configure automated data cleaning stages to remove artifacts and invalid values from biometric signals.
+                  </p>
+
+                  <div className="cleaning-enable-toggle">
+                    <label className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={cleaningEnabled}
+                        onChange={(e) => setCleaningEnabled(e.target.checked)}
+                      />
+                      <span className="toggle-text">Enable Data Cleaning</span>
+                    </label>
+                  </div>
+
+                  {cleaningEnabled && (
+                    <div className="cleaning-stages-panel">
+                      <h4 className="cleaning-subtitle">Select Cleaning Stages</h4>
+                      <p className="cleaning-hint">
+                        Choose which cleaning operations to apply. Hover over each option for details.
+                      </p>
+
+                      <div className="cleaning-stages-grid">
+                        <label className="cleaning-stage-item" title="Remove NaN, infinite values, and negative values (where applicable)">
+                          <input
+                            type="checkbox"
+                            checked={cleaningStages.remove_invalid}
+                            onChange={(e) => setCleaningStages({...cleaningStages, remove_invalid: e.target.checked})}
+                          />
+                          <div className="stage-content">
+                            <strong>Remove Invalid Values</strong>
+                            <span className="stage-description">NaN, infinity, negatives</span>
+                          </div>
+                          <span className="recommended-badge">Recommended</span>
+                        </label>
+
+                        <label className="cleaning-stage-item" title="Remove values outside physiologically valid ranges (e.g., HR: 30-220 bpm)">
+                          <input
+                            type="checkbox"
+                            checked={cleaningStages.remove_physiological_outliers}
+                            onChange={(e) => setCleaningStages({...cleaningStages, remove_physiological_outliers: e.target.checked})}
+                          />
+                          <div className="stage-content">
+                            <strong>Remove Physiological Outliers</strong>
+                            <span className="stage-description">Values outside valid ranges</span>
+                          </div>
+                          <span className="recommended-badge">Recommended</span>
+                        </label>
+
+                        <label className="cleaning-stage-item" title="Remove statistical outliers using modified z-score (>3.5 standard deviations)">
+                          <input
+                            type="checkbox"
+                            checked={cleaningStages.remove_statistical_outliers}
+                            onChange={(e) => setCleaningStages({...cleaningStages, remove_statistical_outliers: e.target.checked})}
+                          />
+                          <div className="stage-content">
+                            <strong>Remove Statistical Outliers</strong>
+                            <span className="stage-description">Beyond 3.5 std deviations</span>
+                          </div>
+                        </label>
+
+                        <label className="cleaning-stage-item" title="Remove artifacts with unrealistic rate of change (e.g., HR change >30 bpm/sec)">
+                          <input
+                            type="checkbox"
+                            checked={cleaningStages.remove_sudden_changes}
+                            onChange={(e) => setCleaningStages({...cleaningStages, remove_sudden_changes: e.target.checked})}
+                          />
+                          <div className="stage-content">
+                            <strong>Remove Sudden Changes</strong>
+                            <span className="stage-description">Unrealistic rate of change</span>
+                          </div>
+                          <span className="recommended-badge">Recommended</span>
+                        </label>
+
+                        <label className="cleaning-stage-item" title="Fill small gaps in data using linear interpolation">
+                          <input
+                            type="checkbox"
+                            checked={cleaningStages.interpolate}
+                            onChange={(e) => setCleaningStages({...cleaningStages, interpolate: e.target.checked})}
+                          />
+                          <div className="stage-content">
+                            <strong>Interpolate Missing Values</strong>
+                            <span className="stage-description">Fill small gaps linearly</span>
+                          </div>
+                          <span className="recommended-badge">Recommended</span>
+                        </label>
+
+                        <label className="cleaning-stage-item" title="Apply median filter to reduce high-frequency noise">
+                          <input
+                            type="checkbox"
+                            checked={cleaningStages.smooth}
+                            onChange={(e) => setCleaningStages({...cleaningStages, smooth: e.target.checked})}
+                          />
+                          <div className="stage-content">
+                            <strong>Apply Smoothing Filter</strong>
+                            <span className="stage-description">Median filter (window=5)</span>
+                          </div>
+                        </label>
+                      </div>
+
+                      <div className="cleaning-summary-box">
+                        <strong>Selected Stages:</strong> {Object.values(cleaningStages).filter(Boolean).length} of 6
+                      </div>
+                    </div>
+                  )}
+
+                  {!cleaningEnabled && (
+                    <div className="cleaning-disabled-notice">
+                      ℹ️ Data cleaning is disabled. Raw data will be used as-is.
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {hasExternalFiles && wizardStep === 7 && (
                 <ExternalConfigStep
                   externalFilesBySubject={externalFilesBySubject}
                   selectedSubjects={selectedSubjects}
@@ -1724,7 +1889,7 @@ function AnalysisViewer() {
                 />
               )}
 
-              {wizardStep === (hasExternalFiles ? 7 : 6) && (
+              {wizardStep === (hasExternalFiles ? 8 : 7) && (
                 <div className="wizard-section">
                   <h3 className="wizard-section-title">Configuration Review</h3>
                   <p className="wizard-section-description">
@@ -1749,6 +1914,11 @@ function AnalysisViewer() {
                     </div>
                     <div className="summary-item">
                       <strong>Plot Type:</strong> {selectedPlotType}
+                    </div>
+                    <div className="summary-item">
+                      <strong>Data Cleaning:</strong> {cleaningEnabled ? 
+                        `Enabled (${Object.values(cleaningStages).filter(Boolean).length} stages)` : 
+                        'Disabled'}
                     </div>
                     {hasExternalFiles && (
                       <div className="summary-item">
@@ -1776,7 +1946,7 @@ function AnalysisViewer() {
                 </div>
               )}
 
-              {wizardStep === (hasExternalFiles ? 8 : 7) && (
+              {wizardStep === (hasExternalFiles ? 9 : 8) && (
                 <div className="wizard-section wizard-final">
                   <p className="wizard-section-description">
                     Click the button below to start processing your data. This may take a few moments.
@@ -1809,15 +1979,15 @@ function AnalysisViewer() {
               </button>
 
               <div className="wizard-progress">
-                Step {wizardStep + 1} of {hasExternalFiles ? 9 : 8}
+                Step {wizardStep + 1} of {hasExternalFiles ? 10 : 9}
               </div>
 
               <button
                 onClick={nextWizardStep}
-                disabled={wizardStep === (hasExternalFiles ? 8 : 7)}
+                disabled={wizardStep === (hasExternalFiles ? 9 : 8)}
                 className="wizard-nav-btn next"
               >
-                Next →
+                Next 
               </button>
             </div>
           </div>
@@ -1878,7 +2048,7 @@ function AnalysisViewer() {
               onClick={handlePrevStep}
               disabled={currentStep === 0}
             >
-              ← Back
+              Back
             </button>
             
             <div className="wizard-progress">
@@ -1890,7 +2060,7 @@ function AnalysisViewer() {
               onClick={handleNextStep}
               disabled={currentStep === wizardSteps.length - 1}
             >
-              Next →
+              Next 
             </button>
           </div>
         </div>
