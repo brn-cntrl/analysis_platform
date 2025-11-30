@@ -189,47 +189,15 @@ def extract_window_data(emotibit_df, event_markers_df, offset, window_config):
     return combined_data
 
 def get_subject_files(manifest, subject_name):
-    """
-    Collect all manifest entries associated with a given subject.
-    This helper scans the provided manifest and returns a dictionary of file descriptors
-    for the specified subject. Files are matched by either:
-    - Exact match on the item's "subject" field, or
-    - A substring match of `subject_name` within the item's "path".
-    Event markers are resolved with the following priority:
-    1) Per-subject entry from `manifest["event_markers_by_subject"][subject_name]` (if present).
-    2) Fallback to a single `manifest["event_markers"]` entry when its "path" contains `subject_name`.
-    In addition to returning the results, the function prints a short debug summary to stdout
-    indicating how many files were found per category and whether event markers were resolved.
-    Args:
-        manifest (dict): Manifest describing discovered files. Expected (optional) keys:
-            - "emotibit_files": list of dicts with at least "path" (str) and optionally "subject" (str).
-            - "respiration_files": list of dicts with at least "path" (str) and optionally "subject" (str).
-            - "psychopy_files": list of dicts with at least "path" (str) and optionally "subject" (str).
-            - "event_markers_by_subject": dict mapping subject_name (str) -> event markers dict.
-            - "event_markers": single event markers dict with at least "path" (str).
-        subject_name (str): Subject identifier used to filter and resolve entries.
-    Returns:
-        dict: A dictionary with the following keys:
-            - "emotibit_files" (list[dict]): EmotiBit file entries for the subject.
-            - "event_markers" (dict | None): Resolved event markers entry, or None if not found.
-            - "respiration_files" (list[dict]): Respiration file entries for the subject.
-            - "psychopy_files" (list[dict]): PsychoPy file entries for the subject.
-    Notes:
-        - Missing sections in the manifest are handled gracefully (treated as empty).
-        - Matching is inclusive: either explicit "subject" equality or path-based substring.
-        - The function emits debug prints to stdout for traceability.
-    """
     
     subject_files = {
         'emotibit_files': [],
         'event_markers': None,
         'respiration_files': [],
-        'psychopy_files': []  # NEW: Add PsychoPy files
+        'external_files': [] 
     }
     
-    # Filter emotibit files for this subject
     for emotibit_file in manifest.get('emotibit_files', []):
-        # Check both 'subject' key and path-based matching
         if (emotibit_file.get('subject') == subject_name or 
             subject_name in emotibit_file.get('path', '')):
             subject_files['emotibit_files'].append(emotibit_file)
@@ -252,17 +220,17 @@ def get_subject_files(manifest, subject_name):
             subject_name in resp_file.get('path', '')):
             subject_files['respiration_files'].append(resp_file)
     
-    # Filter PsychoPy files for this subject
-    for psychopy_file in manifest.get('psychopy_files', []):
-        if (psychopy_file.get('subject') == subject_name or 
-            subject_name in psychopy_file.get('path', '')):
-            subject_files['psychopy_files'].append(psychopy_file)
+    # Filter external files for this subject
+    for external_file in manifest.get('external_files', []):
+        if (external_file.get('subject') == subject_name or 
+            subject_name in external_file.get('path', '')):
+            subject_files['external_files'].append(external_file)
     
     # DEBUG: Log what was found
     print(f"\n  Subject files for {subject_name}:")
     print(f"    - EmotiBit: {len(subject_files['emotibit_files'])} files")
     print(f"    - Event markers: {'✓' if subject_files['event_markers'] else '❌ MISSING'}")
-    print(f"    - PsychoPy: {len(subject_files['psychopy_files'])} files")
+    print(f"    - External data: {len(subject_files['external_files'])} files")
     
     return subject_files
 

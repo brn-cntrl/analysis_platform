@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './AnalysisViewer.css';
-import PsychoPyConfigStep from './PsychoPyConfigStep';
-import './PsychoPyConfig.css';
+import ExternalConfigStep from './ExternalConfigStep';
+import './ExternalConfigStep.css';
 
 function AnalysisViewer() {
   const [selectedFolder, setSelectedFolder] = useState(null);
@@ -29,34 +29,15 @@ function AnalysisViewer() {
   const [subjectAvailability, setSubjectAvailability] = useState({});
   const [batchStatusMessage, setBatchStatusMessage] = useState('');
   
-  // PsychoPy state - UPDATED FOR MULTIPLE FILES
-  const [psychopyFilesBySubject, setPsychopyFilesBySubject] = useState({});
-  const [hasPsychoPyFiles, setHasPsychoPyFiles] = useState(false);
-  const [subjectsWithPsychopy, setSubjectsWithPsychopy] = useState([]);
-  const [psychopyConfigs, setPsychopyConfigs] = useState({});
+  // External data file state - UPDATED FOR MULTIPLE FILES
+  const [externalFilesBySubject, setExternalFilesBySubject] = useState({});
+  const [hasExternalFiles, setHasExternalFiles] = useState(false);
+  const [subjectsWithExternal, setsubjectsWithExternal] = useState([]);
+  const [externalConfigs, setExternalConfigs] = useState({});
 
   const [needsDataParser, setNeedsDataParser] = useState(false);
   const [subjectsNeedingParser, setSubjectsNeedingParser] = useState([]);
   const [parserLaunchStatus, setParserLaunchStatus] = useState('');
-
-  // // PsychoPy state
-  // const [hasPsychoPyFile, setHasPsychoPyFile] = useState(false);
-  // const [psychopyFile, setPsychopyFile] = useState(null);
-  // const [psychopyColumns, setPsychopyColumns] = useState([]);
-  // const [psychopyColumnTypes, setPsychopyColumnTypes] = useState([]);
-  // const [psychopySampleData, setPsychopySampleData] = useState([]);
-  // const [psychopyConfig, setPsychopyConfig] = useState({
-  //   timestampColumn: '',
-  //   timestampFormat: 'seconds',
-  //   dataColumns: [{
-  //     column: '',
-  //     displayName: '',
-  //     dataType: 'continuous',
-  //     units: ''
-  //   }],
-  //   eventSources: [],
-  //   conditionColumns: []
-  // });
 
   // Wizard state
   const [showConfigWizard, setShowConfigWizard] = useState(false);
@@ -71,6 +52,71 @@ function AnalysisViewer() {
   const [configIssues, setConfigIssues] = useState([]);
   // const [lastAnalysisStatus, setLastAnalysisStatus] = useState(null);
 
+  const validateConfiguration = React.useCallback(() => {
+    const issues = [];
+    
+    const selectedSubjectsList = Object.keys(selectedSubjects).filter(s => selectedSubjects[s]);
+    if (selectedSubjectsList.length === 0) {
+      issues.push('No subjects selected');
+    }
+    
+    const selectedMetricsList = Object.keys(selectedMetrics).filter(m => selectedMetrics[m]);
+    if (selectedMetricsList.length === 0) {
+      issues.push('No biometric tags selected');
+    }
+    
+    const hasValidEvent = selectedEvents.some(e => e.event !== '');
+    if (!hasValidEvent) {
+      issues.push('No event markers selected');
+    }
+    
+    if (hasExternalFiles) {
+      selectedSubjectsList.forEach(subject => {
+        if (subjectsWithExternal.includes(subject)) {
+          const subjectConfigs = externalConfigs[subject] || {};
+          Object.entries(subjectConfigs).forEach(([filename, config]) => {
+            if (!config.selected) return;
+            
+            if (!config.timestampColumn) {
+              issues.push(`External (${subject}/${filename}): No timestamp column selected`);
+            }
+            
+            const validDataColumns = config.dataColumns.filter(dc => dc.column && dc.displayName);
+            if (validDataColumns.length === 0) {
+              issues.push(`External (${subject}/${filename}): No data columns configured`);
+            }
+          });
+        }
+      });
+    }
+
+    if (subjectAvailability && Object.keys(subjectAvailability).length > 0 && selectedSubjectsList.length > 0) {
+      selectedSubjectsList.forEach(subject => {
+        const subjectData = subjectAvailability[subject];
+        if (!subjectData) return;
+        
+        selectedMetricsList.forEach(metric => {
+          if (metric === 'HRV') return;
+          if (!subjectData.metrics.includes(metric)) {
+            issues.push(`Subject ${subject} missing metric: ${metric}`);
+          }
+        });
+        
+        selectedEvents.forEach((evt, idx) => {
+          if (evt.event && evt.event !== 'all' && !subjectData.event_markers.includes(evt.event)) {
+            issues.push(`Subject ${subject} missing event: ${evt.event}`);
+          }
+          if (evt.condition !== 'all' && !subjectData.conditions.includes(evt.condition)) {
+            issues.push(`Subject ${subject} missing condition: ${evt.condition}`);
+          }
+        });
+      });
+    }
+    
+    console.log('Validation complete. Issues found:', issues);
+    setConfigIssues(issues);
+  }, [selectedSubjects, selectedMetrics, selectedEvents, hasExternalFiles, subjectsWithExternal, externalConfigs, subjectAvailability]);
+
   // Debug: Monitor when availableMetrics changes
   useEffect(() => {
     console.log('availableMetrics changed:', availableMetrics);
@@ -79,7 +125,7 @@ function AnalysisViewer() {
 
   // Validate configuration when reaching review step (step 6)
   useEffect(() => {
-    if (wizardStep === (hasPsychoPyFiles ? 7 : 6) && showConfigWizard) {
+    if (wizardStep === (hasExternalFiles ? 7 : 6) && showConfigWizard) {
       console.log('Reached review step, validating configuration...');
       console.log('Current state:', {
         selectedSubjects,
@@ -89,8 +135,29 @@ function AnalysisViewer() {
       });
       validateConfiguration();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wizardStep, showConfigWizard]);
+  }, [wizardStep, showConfigWizard, hasExternalFiles, validateConfiguration, selectedSubjects, selectedMetrics, selectedEvents, subjectAvailability]);
+
+  useEffect(() => {
+    const incompatibleCombos = {
+      'mean': ['lineplot', 'scatter', 'boxplot', 'poincare'],
+      'rmssd': ['poincare'],
+      'moving_average': ['poincare']
+    };
+    
+    const invalidPlots = incompatibleCombos[selectedAnalysisMethod] || [];
+    
+    if (invalidPlots.includes(selectedPlotType)) {
+      console.log(`Auto-correcting: ${selectedPlotType} is incompatible with ${selectedAnalysisMethod}`);
+      
+      const allPlots = ['lineplot', 'boxplot', 'scatter', 'poincare', 'barchart'];
+      const validPlot = allPlots.find(plot => !invalidPlots.includes(plot));
+      
+      if (validPlot) {
+        setSelectedPlotType(validPlot);
+        setUploadStatus(`⚠️ Plot type auto-corrected to ${validPlot}: ${selectedPlotType} is not compatible with ${selectedAnalysisMethod} analysis`);
+      }
+    }
+  }, [selectedAnalysisMethod, selectedPlotType, setUploadStatus]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -165,7 +232,7 @@ function AnalysisViewer() {
       respirationFiles: [],
       serFiles: [],
       eventMarkersFiles: [],
-      psychopyFiles: [],
+      externalFiles: [],
       allFiles: files,
       hasPPGFiles: false
     };
@@ -198,9 +265,9 @@ function AnalysisViewer() {
           path: path,
           file: file
         });
-      } else if (path.includes('psychopy_data/') && fileName.endsWith('.csv')) {
-        // Detect PsychoPy files
-        structure.psychopyFiles.push({
+      } else if (path.includes('external_data/') && fileName.endsWith('.csv')) {
+     
+        structure.externalFiles.push({
           name: file.name,
           path: path,
           file: file
@@ -234,7 +301,7 @@ function AnalysisViewer() {
     setIsScanning(true);
     setUploadStatus('Scanning folder data...');
 
-    const readPsychoPyFile = (file) => {
+    const readExternalFile = (file) => {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (e) => {
@@ -328,39 +395,39 @@ function AnalysisViewer() {
       setIsBatchMode(false);
     }
 
-    const psychopyMetadata = {};
-    const psychopyPromises = [];
+    const externalMetadata = {};
+    const externalPromises = [];
 
-    structure.psychopyFiles.forEach(psychopyFile => {
-      const parts = psychopyFile.path.split('/');
+    structure.externalFiles.forEach(externalFile => {
+      const parts = externalFile.path.split('/');
       if (parts.length >= 3) {
         const subject = parts[1];
         const filename = parts[parts.length - 1];
         const filenameparts = filename.replace('.csv', '').split('_');
         const experimentName = filenameparts.length >= 3 ? filenameparts[2] : 'Unknown';
         
-        const promise = readPsychoPyFile(psychopyFile.file).then(metadata => {
-          if (!psychopyMetadata[subject]) {
-            psychopyMetadata[subject] = [];
+        const promise = readExternalFile(externalFile.file).then(metadata => {
+          if (!externalMetadata[subject]) {
+            externalMetadata[subject] = [];
           }
-          psychopyMetadata[subject].push({
+          externalMetadata[subject].push({
             filename: filename,
-            path: psychopyFile.path,
+            path: externalFile.path,
             experiment_name: experimentName,
             ...metadata
           });
         }).catch(error => {
-          console.error(`Error reading PsychoPy file ${filename}:`, error);
+          console.error(`Error reading external data file ${filename}:`, error);
         });
         
-        psychopyPromises.push(promise);
+        externalPromises.push(promise);
       }
     });
 
-    await Promise.all(psychopyPromises);
+    await Promise.all(externalPromises);
 
-    if (Object.keys(psychopyMetadata).length > 0) {
-      formData.append('psychopy_metadata', JSON.stringify(psychopyMetadata));
+    if (Object.keys(externalMetadata).length > 0) {
+      formData.append('external_metadata', JSON.stringify(externalMetadata));
     }
 
     try { 
@@ -415,15 +482,15 @@ function AnalysisViewer() {
           setSubjectAvailability(data.subject_availability);
         }
         
-        if (data.psychopy_data && data.psychopy_data.has_files) {
-          console.log('PsychoPy files detected:', data.psychopy_data.files_by_subject);
-          setPsychopyFilesBySubject(data.psychopy_data.files_by_subject);
-          setSubjectsWithPsychopy(data.psychopy_data.subjects_with_psychopy);
-          setHasPsychoPyFiles(true);
+        if (data.external_data && data.external_data.has_files) {
+          console.log('External data files detected:', data.external_data.files_by_subject);
+          setExternalFilesBySubject(data.external_data.files_by_subject);
+          setsubjectsWithExternal(data.external_data.subjects_with_external);
+          setHasExternalFiles(true);
           
           // Initialize configs for each file
           const initialConfigs = {};
-          Object.entries(data.psychopy_data.files_by_subject).forEach(([subject, files]) => {
+          Object.entries(data.external_data.files_by_subject).forEach(([subject, files]) => {
             initialConfigs[subject] = {};
             files.forEach(fileData => {
               initialConfigs[subject][fileData.filename] = {
@@ -440,10 +507,10 @@ function AnalysisViewer() {
               };
             });
           });
-          setPsychopyConfigs(initialConfigs);
+          setExternalConfigs(initialConfigs);
         } else {
-          setHasPsychoPyFiles(false);
-          setPsychopyFilesBySubject({});
+          setHasExternalFiles(false);
+          setExternalFilesBySubject({});
         }
 
         const eventMarkersMsg = data.event_markers && data.event_markers.length > 0 
@@ -456,15 +523,15 @@ function AnalysisViewer() {
           ? `, ${data.subjects.length} subjects detected`
           : '';
 
-        const psychopyMsg = data.psychopy_data && data.psychopy_data.has_files
-        ? `, PsychoPy data found for ${data.psychopy_data.subjects_with_psychopy.length} subject(s)`
+        const externalMsg = data.external_data && data.external_data.has_files
+        ? `, External data files found for ${data.external_data.subjects_with_external.length} subject(s)`
         : '';
         
         if (data.batch_mode && data.subjects && data.subjects.length > 1) {
           const intersectionMsg = `📊 Showing ${data.metrics.length} common metrics, ${data.event_markers.length} common markers, ${data.conditions.length} common conditions across ${data.subjects.length} subjects`;
           setBatchStatusMessage(intersectionMsg);
         }
-        setUploadStatus(`Found ${metrics.length} metrics${eventMarkersMsg}${conditionsMsg}${subjectsMsg}${psychopyMsg}`);
+        setUploadStatus(`Found ${metrics.length} metrics${eventMarkersMsg}${conditionsMsg}${subjectsMsg}${externalMsg}`);
         // Check if any subjects need DataParser
         if (data.subjects && data.subjects.length > 0) {
           const subjectsNeedingParserList = [];
@@ -641,7 +708,7 @@ function AnalysisViewer() {
   };
 
   const nextWizardStep = () => {
-    const maxStep = hasPsychoPyFiles ? 8 : 7;
+    const maxStep = hasExternalFiles ? 8 : 7;
     if (wizardStep < maxStep) {
       setWizardStep(wizardStep + 1);
     }
@@ -671,73 +738,6 @@ function AnalysisViewer() {
     const updated = [...selectedEvents];
     updated[index][field] = value;
     setSelectedEvents(updated);
-  };
-
-  const validateConfiguration = () => {
-    const issues = [];
-    
-    const selectedSubjectsList = Object.keys(selectedSubjects).filter(s => selectedSubjects[s]);
-    if (selectedSubjectsList.length === 0) {
-      issues.push('No subjects selected');
-    }
-    
-    const selectedMetricsList = Object.keys(selectedMetrics).filter(m => selectedMetrics[m]);
-    if (selectedMetricsList.length === 0) {
-      issues.push('No biometric tags selected');
-    }
-    
-    const hasValidEvent = selectedEvents.some(e => e.event !== '');
-    if (!hasValidEvent) {
-      issues.push('No event markers selected');
-    }
-    
-    if (hasPsychoPyFiles) {
-      // Validate PsychoPy configs for selected subjects - ONLY check selected files!
-      selectedSubjectsList.forEach(subject => {
-        if (subjectsWithPsychopy.includes(subject)) {
-          const subjectConfigs = psychopyConfigs[subject] || {};
-          Object.entries(subjectConfigs).forEach(([filename, config]) => {
-            // CRITICAL: Only validate files that were explicitly selected
-            if (!config.selected) return;
-            
-            if (!config.timestampColumn) {
-              issues.push(`PsychoPy (${subject}/${filename}): No timestamp column selected`);
-            }
-            
-            const validDataColumns = config.dataColumns.filter(dc => dc.column && dc.displayName);
-            if (validDataColumns.length === 0) {
-              issues.push(`PsychoPy (${subject}/${filename}): No data columns configured`);
-            }
-          });
-        }
-      });
-    }
-
-    if (subjectAvailability && Object.keys(subjectAvailability).length > 0 && selectedSubjectsList.length > 0) {
-      selectedSubjectsList.forEach(subject => {
-        const subjectData = subjectAvailability[subject];
-        if (!subjectData) return;
-        
-        selectedMetricsList.forEach(metric => {
-          if (metric === 'HRV') return;
-          if (!subjectData.metrics.includes(metric)) {
-            issues.push(`Subject ${subject} missing metric: ${metric}`);
-          }
-        });
-        
-        selectedEvents.forEach((evt, idx) => {
-          if (evt.event && evt.event !== 'all' && !subjectData.event_markers.includes(evt.event)) {
-            issues.push(`Subject ${subject} missing event: ${evt.event}`);
-          }
-          if (evt.condition !== 'all' && !subjectData.conditions.includes(evt.condition)) {
-            issues.push(`Subject ${subject} missing condition: ${evt.condition}`);
-          }
-        });
-      });
-    }
-    
-    console.log('Validation complete. Issues found:', issues);
-    setConfigIssues(issues);
   };
 
   const uploadAndAnalyze = async () => {
@@ -806,22 +806,22 @@ function AnalysisViewer() {
       }
     });
 
-    if (hasPsychoPyFiles) {
+    if (hasExternalFiles) {
       selectedSubjectsList.forEach(subject => {
-        if (subjectsWithPsychopy.includes(subject) && psychopyFilesBySubject[subject]) {
-          psychopyFilesBySubject[subject].forEach(fileData => {
-            const psychopyFile = fileStructure.psychopyFiles.find(f => f.path === fileData.path);
-            if (psychopyFile && !addedFilePaths.has(psychopyFile.path)) {
-              filesToUpload.push(psychopyFile.file);
-              pathsToUpload.push(psychopyFile.path);
-              addedFilePaths.add(psychopyFile.path);
+        if (subjectsWithExternal.includes(subject) && externalFilesBySubject[subject]) {
+          externalFilesBySubject[subject].forEach(fileData => {
+            const externalFile = fileStructure.externalFiles.find(f => f.path === fileData.path);
+            if (externalFile && !addedFilePaths.has(externalFile.path)) {
+              filesToUpload.push(externalFile.file);
+              pathsToUpload.push(externalFile.path);
+              addedFilePaths.add(externalFile.path);
             }
           });
         }
       });
       
-      formData.append('psychopy_configs', JSON.stringify(psychopyConfigs));
-      formData.append('has_psychopy_data', 'true');
+      formData.append('external_configs', JSON.stringify(externalConfigs));
+      formData.append('has_external_data', 'true');
     }
 
     console.log(`Uploading ${filesToUpload.length} files for analysis:`, pathsToUpload.map(p => p.split('/').pop()));
@@ -839,22 +839,22 @@ function AnalysisViewer() {
     formData.append('analysis_type', analysisType);  
     formData.append('student_id', localStorage.getItem('studentId'));
 
-    if (hasPsychoPyFiles) {
+    if (hasExternalFiles) {
       selectedSubjectsList.forEach(subject => {
-        if (subjectsWithPsychopy.includes(subject) && psychopyFilesBySubject[subject]) {
-          psychopyFilesBySubject[subject].forEach(fileData => {
-            const psychopyFile = fileStructure.psychopyFiles.find(f => f.path === fileData.path);
-            if (psychopyFile && !addedFilePaths.has(psychopyFile.path)) {
-              filesToUpload.push(psychopyFile.file);
-              pathsToUpload.push(psychopyFile.path);
-              addedFilePaths.add(psychopyFile.path);
+        if (subjectsWithExternal.includes(subject) && externalFilesBySubject[subject]) {
+          externalFilesBySubject[subject].forEach(fileData => {
+            const externalFile = fileStructure.externalFiles.find(f => f.path === fileData.path);
+            if (externalFile && !addedFilePaths.has(externalFile.path)) {
+              filesToUpload.push(externalFile.file);
+              pathsToUpload.push(externalFile.path);
+              addedFilePaths.add(externalFile.path);
             }
           });
         }
       });
       
-      formData.append('psychopy_configs', JSON.stringify(psychopyConfigs));
-      formData.append('has_psychopy_data', 'true');
+      formData.append('external_configs', JSON.stringify(externalConfigs));
+      formData.append('has_external_data', 'true');
     }
 
     if (selectedSubjectsList.length > 1) {
@@ -870,8 +870,8 @@ function AnalysisViewer() {
     console.log('Selected events:', selectedEvents);
     console.log('Analysis method:', selectedAnalysisMethod);
     console.log('Plot type:', selectedPlotType);
-    console.log('Has PsychoPy:', hasPsychoPyFiles);
-    console.log('PsychoPy subjects:', subjectsWithPsychopy.filter(s => selectedSubjects[s]));
+    console.log('Has external data:', hasExternalFiles);
+    console.log('External data subjects:', subjectsWithExternal.filter(s => selectedSubjects[s]));
     console.log('==========================');
     
     try {
@@ -1186,9 +1186,9 @@ function AnalysisViewer() {
             </div>
 
             <div className="file-category">
-              <strong>PsychoPy Data:</strong>
-              {fileStructure.psychopyFiles.length > 0 ? (
-                <span className="file-count">✓ {fileStructure.psychopyFiles.length} file(s) from {subjectsWithPsychopy.length} subject(s)</span>
+              <strong>External Data Files:</strong>
+              {fileStructure.externalFiles.length > 0 ? (
+                <span className="file-count">✓ {fileStructure.externalFiles.length} file(s) from {subjectsWithExternal.length} subject(s)</span>
               ) : (
                 <span style={{ color: '#666', fontSize: '14px' }}>⚠️ Not found (optional)</span>
               )}
@@ -1288,7 +1288,7 @@ function AnalysisViewer() {
             </div>
 
             <div className="wizard-breadcrumbs">
-            {['Type', 'Tags', 'Events', 'Conditions', 'Method', 'Plot', ...(hasPsychoPyFiles ? ['PsychoPy'] : []), 'Review', 'Run'].map((label, idx) => (
+            {['Type', 'Tags', 'Events', 'Conditions', 'Method', 'Plot', ...(hasExternalFiles ? ['External'] : []), 'Review', 'Run'].map((label, idx) => (
                 <div
                   key={idx}
                   className={`breadcrumb ${wizardStep === idx ? 'active' : ''} ${wizardStep > idx ? 'completed' : ''}`}
@@ -1611,75 +1611,120 @@ function AnalysisViewer() {
                   </p>
 
                   <div className="plot-grid">
-                    <label className="plot-option">
-                      <input
-                        type="radio"
-                        name="plotType"
-                        value="lineplot"
-                        checked={selectedPlotType === 'lineplot'}
-                        onChange={(e) => setSelectedPlotType(e.target.value)}
-                      />
-                      <div className="plot-content">
-                        <strong>Line Plot</strong>
-                        <span>Time series visualization</span>
-                      </div>
-                    </label>
+                    <label className={`plot-option ${selectedAnalysisMethod === 'mean' ? 'disabled' : ''}`}>
+                          <input
+                            type="radio"
+                            name="plotType"
+                            value="lineplot"
+                            checked={selectedPlotType === 'lineplot'}
+                            onChange={(e) => setSelectedPlotType(e.target.value)}
+                            disabled={selectedAnalysisMethod === 'mean'}
+                          />
+                          <div className="plot-content">
+                            <strong>Line Plot</strong>
+                            <span>Time series visualization</span>
+                            {selectedAnalysisMethod === 'mean' && (
+                              <span className="incompatible-note">Requires time-series data</span>
+                            )}
+                          </div>
+                        </label>
+
+                    <label className={`plot-option ${selectedAnalysisMethod === 'mean' ? 'disabled' : ''}`}>
+                          <input
+                            type="radio"
+                            name="plotType"
+                            value="boxplot"
+                            checked={selectedPlotType === 'boxplot'}
+                            onChange={(e) => setSelectedPlotType(e.target.value)}
+                            disabled={selectedAnalysisMethod === 'mean'}
+                          />
+                          <div className="plot-content">
+                            <strong>Box Plot</strong>
+                            <span>Distribution summary</span>
+                            {selectedAnalysisMethod === 'mean' && (
+                              <span className="incompatible-note">Requires distribution data</span>
+                            )}
+                          </div>
+                        </label>
+
+                    <label className={`plot-option ${['rmssd', 'moving_average', 'mean'].includes(selectedAnalysisMethod) ? 'disabled' : ''}`}>
+                          <input
+                            type="radio"
+                            name="plotType"
+                            value="poincare"
+                            checked={selectedPlotType === 'poincare'}
+                            onChange={(e) => setSelectedPlotType(e.target.value)}
+                            disabled={['rmssd', 'moving_average', 'mean'].includes(selectedAnalysisMethod)}
+                          />
+                          <div className="plot-content">
+                            <strong>Poincaré Plot</strong>
+                            <span>HRV analysis</span>
+                            {selectedAnalysisMethod === 'rmssd' && (
+                              <span className="incompatible-note">Requires raw data</span>
+                            )}
+                            {selectedAnalysisMethod === 'moving_average' && (
+                              <span className="incompatible-note">Requires raw data</span>
+                            )}
+                            {selectedAnalysisMethod === 'mean' && (
+                              <span className="incompatible-note">Requires multiple data points</span>
+                            )}
+                          </div>
+                        </label>
+
+                    <label className={`plot-option ${selectedAnalysisMethod === 'mean' ? 'disabled' : ''}`}>
+                          <input
+                            type="radio"
+                            name="plotType"
+                            value="scatter"
+                            checked={selectedPlotType === 'scatter'}
+                            onChange={(e) => setSelectedPlotType(e.target.value)}
+                            disabled={selectedAnalysisMethod === 'mean'}
+                          />
+                          <div className="plot-content">
+                            <strong>Scatter Plot</strong>
+                            <span>Point distribution</span>
+                            {selectedAnalysisMethod === 'mean' && (
+                              <span className="incompatible-note">Requires multiple data points</span>
+                            )}
+                          </div>
+                        </label>
 
                     <label className="plot-option">
-                      <input
-                        type="radio"
-                        name="plotType"
-                        value="boxplot"
-                        checked={selectedPlotType === 'boxplot'}
-                        onChange={(e) => setSelectedPlotType(e.target.value)}
-                      />
-                      <div className="plot-content">
-                        <strong>Box Plot</strong>
-                        <span>Distribution summary</span>
-                      </div>
-                    </label>
-
-                    <label className="plot-option">
-                      <input
-                        type="radio"
-                        name="plotType"
-                        value="poincare"
-                        checked={selectedPlotType === 'poincare'}
-                        onChange={(e) => setSelectedPlotType(e.target.value)}
-                      />
-                      <div className="plot-content">
-                        <strong>Poincaré Plot</strong>
-                        <span>HRV analysis</span>
-                      </div>
-                    </label>
-
-                    <label className="plot-option">
-                      <input
-                        type="radio"
-                        name="plotType"
-                        value="scatter"
-                        checked={selectedPlotType === 'scatter'}
-                        onChange={(e) => setSelectedPlotType(e.target.value)}
-                      />
-                      <div className="plot-content">
-                        <strong>Scatter Plot</strong>
-                        <span>Point distribution</span>
-                      </div>
-                    </label>
+                          <input
+                            type="radio"
+                            name="plotType"
+                            value="barchart"
+                            checked={selectedPlotType === 'barchart'}
+                            onChange={(e) => setSelectedPlotType(e.target.value)}
+                          />
+                          <div className="plot-content">
+                            <strong>Bar Chart</strong>
+                            <span>Statistical comparison</span>
+                            {selectedAnalysisMethod === 'mean' && (
+                              <span className="recommended-note">✓ Recommended for Mean analysis</span>
+                            )}
+                          </div>
+                        </label>
                   </div>
+                  
+                  {selectedAnalysisMethod === 'mean' && (
+                    <div className="compatibility-hint">
+                      💡 <strong>Tip:</strong> Mean analysis works best with the comparison bar chart (automatically generated)
+                    </div>
+                  )}
                 </div>
               )}
 
-              {hasPsychoPyFiles && wizardStep === 6 && (
-                <PsychoPyConfigStep
-                  psychopyFilesBySubject={psychopyFilesBySubject}
+              {hasExternalFiles && wizardStep === 6 && (
+                <ExternalConfigStep
+                  externalFilesBySubject={externalFilesBySubject}
                   selectedSubjects={selectedSubjects}
-                  psychopyConfigs={psychopyConfigs}
-                  setPsychopyConfigs={setPsychopyConfigs}
+                  externalConfigs={externalConfigs}
+                  setExternalConfigs={setExternalConfigs}
                 />
               )}
 
-              {wizardStep === (hasPsychoPyFiles ? 7 : 6) && (
+              {wizardStep === (hasExternalFiles ? 7 : 6) && (
                 <div className="wizard-section">
                   <h3 className="wizard-section-title">Configuration Review</h3>
                   <p className="wizard-section-description">
@@ -1705,9 +1750,9 @@ function AnalysisViewer() {
                     <div className="summary-item">
                       <strong>Plot Type:</strong> {selectedPlotType}
                     </div>
-                    {hasPsychoPyFiles && (
+                    {hasExternalFiles && (
                       <div className="summary-item">
-                        <strong>PsychoPy Files:</strong> {subjectsWithPsychopy.filter(s => selectedSubjects[s]).length} subject(s) with data
+                        <strong>External Data Files:</strong> {subjectsWithExternal.filter(s => selectedSubjects[s]).length} subject(s) with data
                       </div>
                     )}
                   </div>
@@ -1731,7 +1776,7 @@ function AnalysisViewer() {
                 </div>
               )}
 
-              {wizardStep === (hasPsychoPyFiles ? 8 : 7) && (
+              {wizardStep === (hasExternalFiles ? 8 : 7) && (
                 <div className="wizard-section wizard-final">
                   <p className="wizard-section-description">
                     Click the button below to start processing your data. This may take a few moments.
@@ -1764,12 +1809,12 @@ function AnalysisViewer() {
               </button>
 
               <div className="wizard-progress">
-                Step {wizardStep + 1} of {hasPsychoPyFiles ? 9 : 8}
+                Step {wizardStep + 1} of {hasExternalFiles ? 9 : 8}
               </div>
 
               <button
                 onClick={nextWizardStep}
-                disabled={wizardStep === (hasPsychoPyFiles ? 8 : 7)}
+                disabled={wizardStep === (hasExternalFiles ? 8 : 7)}
                 className="wizard-nav-btn next"
               >
                 Next →

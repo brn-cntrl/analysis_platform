@@ -336,6 +336,20 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
                         print(f"  ⚠ Warning: File for metric {metric} not found - skipping")
                         continue
                     
+                    # VALIDATION: Verify the file contains expected metric data
+                    try:
+                        test_df = pd.read_csv(metric_file)
+                        actual_metric_col = test_df.columns[-1]
+                        print(f"  ✓ Verified metric column: '{actual_metric_col}'")
+                        
+                        if test_df.shape[0] == 0:
+                            print(f"  ⚠ Warning: Metric file is empty - skipping")
+                            continue
+                            
+                    except Exception as e:
+                        print(f"  ⚠ Error validating metric file: {e}")
+                        continue
+                    
                     # Use original single-subject logic
                     metric_results, metric_plots = analyze_metric(
                         metric_file, 
@@ -457,25 +471,26 @@ def analyze_metric(metric_file, df_markers, comparison_groups, metric,
         print(f"    {group_label}: mean={stats['mean']:.2f}, std={stats['std']:.2f}, n={stats['count']}")
     
     # Generate plots
+    # Generate plots
     print(f"\n  Creating visualizations (Plot type: {plot_type})...")
     plots = []
     
-    # Main plot based on selected type
-    # Main plot based on selected type
-    plot1 = generate_plot(
-        group_data_processed, 
-        metric_col, 
-        metric, 
-        plot_type,
-        analysis_method,
-        output_folder,
-        suffix=subject_suffix,
-        subject_label=subject_label
-    )
-    if plot1:
-        plots.append(plot1)
+    # Main plot based on selected type (skip for barchart - it's the comparison plot)
+    if plot_type != 'barchart':
+        plot1 = generate_plot(
+            group_data_processed, 
+            metric_col, 
+            metric, 
+            plot_type,
+            analysis_method,
+            output_folder,
+            suffix=subject_suffix,
+            subject_label=subject_label
+        )
+        if plot1:
+            plots.append(plot1)
     
-    # Comparison plot (if multiple groups)
+    # Comparison/Bar chart - only generate if there's something to compare
     if len(group_data_processed) >= 2:
         plot2 = generate_comparison_plot(
             metric_results, 
@@ -487,6 +502,8 @@ def analyze_metric(metric_file, df_markers, comparison_groups, metric,
         )
         if plot2:
             plots.append(plot2)
+    elif plot_type == 'barchart':
+        print(f"    ⚠ Skipping bar chart - only {len(group_data_processed)} event window selected (need 2+ for comparison)")
     else:
         print(f"    ⚠ Skipping comparison plot - single group analysis")
     
@@ -580,7 +597,7 @@ def analyze_metric_multi_subject(manifest, selected_subjects, comparison_groups,
 
     # CRITICAL FIX: Get metric column (column index 1), not AdjustedTimestamp (last column)
     first_data = list(group_data_raw.values())[0]
-    metric_col = first_data.columns[1] if len(first_data.columns) >= 2 else first_data.columns[-1]
+    metric_col = first_data.columns[1] 
     print(f"  Using metric column: '{metric_col}'")
 
     group_data_processed = {}
@@ -612,32 +629,39 @@ def analyze_metric_multi_subject(manifest, selected_subjects, comparison_groups,
     # ═══════════════════════════════════════════════════════════════
     # STEP 4: Generate visualizations
     # ═══════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════
+    # STEP 4: Generate visualizations
+    # ═══════════════════════════════════════════════════════════════
     print(f"\n  Creating visualizations (Plot type: {plot_type})...")
     plots = []
     
-    # Main plot based on selected type
-    plot1 = generate_plot(
-        group_data_processed, 
-        metric_col, 
-        metric, 
-        plot_type,
-        analysis_method,
-        output_folder,
-        suffix='_multi_subject'  # ← Distinguish from single-subject plots
-    )
-    if plot1:
-        plots.append(plot1)
+    # Main plot based on selected type (skip for barchart - it's the comparison plot)
+    if plot_type != 'barchart':
+        plot1 = generate_plot(
+            group_data_processed, 
+            metric_col, 
+            metric, 
+            plot_type,
+            analysis_method,
+            output_folder,
+            suffix='_multi_subject'
+        )
+        if plot1:
+            plots.append(plot1)
     
-    # Comparison plot (always useful for multi-subject)
-    plot2 = generate_comparison_plot(
-        metric_results, 
-        metric, 
-        analysis_method,
-        output_folder,
-        suffix='_multi_subject'
-    )
-    if plot2:
-        plots.append(plot2)
+    # Comparison/Bar chart - only generate if there's something to compare
+    if len(group_data_processed) >= 2:
+        plot2 = generate_comparison_plot(
+            metric_results, 
+            metric, 
+            analysis_method,
+            output_folder,
+            suffix='_multi_subject'
+        )
+        if plot2:
+            plots.append(plot2)
+    elif plot_type == 'barchart':
+        print(f"    ⚠ Skipping bar chart - only {len(group_data_processed)} event window selected (need 2+ for comparison)")
     
     return metric_results, plots
 

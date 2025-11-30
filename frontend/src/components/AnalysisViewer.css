@@ -1279,6 +1279,64 @@
   color: #666;
 }
 
+.plot-option.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: #f5f5f5;
+  border-color: #e0e0e0;
+}
+
+.plot-option.disabled:hover {
+  border-color: #e0e0e0;
+  background-color: #f5f5f5;
+  transform: none;
+}
+
+.plot-option.disabled input[type="radio"] {
+  cursor: not-allowed;
+}
+
+.plot-option.disabled .plot-content strong,
+.plot-option.disabled .plot-content span {
+  color: #999;
+}
+
+.incompatible-note {
+  display: block;
+  font-size: 12px;
+  color: #d32f2f;
+  font-style: italic;
+  margin-top: 6px;
+  line-height: 1.4;
+}
+
+.recommended-note {
+  display: block;
+  font-size: 12px;
+  color: #4CAF50;
+  font-weight: 600;
+  margin-top: 6px;
+  line-height: 1.4;
+}
+
+.compatibility-hint {
+  margin-top: 20px;
+  padding: 15px;
+  background-color: #e3f2fd;
+  border-left: 4px solid #2196F3;
+  border-radius: 4px;
+  font-size: 14px;
+  color: #1565c0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  line-height: 1.6;
+}
+
+.compatibility-hint strong {
+  font-weight: 600;
+}
+
 .config-summary {
   background-color: #f8f9fa;
   border-radius: 8px;

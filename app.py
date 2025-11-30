@@ -106,7 +106,7 @@ def register():
     
     return jsonify({
         'success': True,
-        'student_id': student_id,  # Return generated ID
+        'student_id': student_id,  
         'name': full_name
     }), 201
 
@@ -135,7 +135,7 @@ def upload_folder_and_analyze():
     # DEBUG: Log incoming request
     # ============================================================================
     print("\n" + "="*80)
-    print("📥 UPLOAD AND ANALYZE REQUEST")
+    print("UPLOAD AND ANALYZE REQUEST")
     print("="*80)
     print(f"Student ID: {request.form.get('student_id', 'unknown')}")
     print(f"Folder name: {request.form.get('folder_name', 'subject_data')}")
@@ -146,7 +146,7 @@ def upload_folder_and_analyze():
     print(f"Plot type: {request.form.get('plot_type', 'lineplot')}")
     print(f"Batch mode: {request.form.get('batch_mode', 'false')}")
     print(f"Analyze HRV: {request.form.get('analyze_hrv', 'false')}")
-    print(f"Has PsychoPy: {request.form.get('has_psychopy_data', 'false')}")
+    print(f"Has External Data: {request.form.get('has_external_data', 'false')}")
     print("="*80 + "\n")
 
     if 'files' not in request.files:
@@ -173,16 +173,16 @@ def upload_folder_and_analyze():
     if batch_mode:
         selected_subjects = json.loads(request.form.get('selected_subjects', '[]'))
     
-    # Parse PsychoPy data
-    has_psychopy_data = request.form.get('has_psychopy_data', 'false') == 'true'
-    psychopy_configs = {}
-    if has_psychopy_data:
-        psychopy_configs_json = request.form.get('psychopy_configs', '{}')
+    # Parse external file data
+    has_external_data = request.form.get('has_external_data', 'false') == 'true'
+    external_configs = {}
+    if has_external_data:
+        external_configs_json = request.form.get('external_configs', '{}')
         try:
-            psychopy_configs = json.loads(psychopy_configs_json)
-            print(f"✓ Parsed PsychoPy configs for {len(psychopy_configs)} subjects")
+            external_configs = json.loads(external_configs_json)
+            print(f"✓ Parsed external data file configs for {len(external_configs)} subjects")
         except json.JSONDecodeError as e:
-            print(f"⚠️ Failed to parse PsychoPy configs: {e}")
+            print(f"Failed to parse external data configs: {e}")
 
     print(f"\n{'='*80}")
     print(f"ANALYSIS REQUEST RECEIVED")
@@ -198,8 +198,7 @@ def upload_folder_and_analyze():
     if batch_mode:
         print(f"Selected Subjects: {selected_subjects}")
     print(f"{'='*80}\n")
-    
-    # Transform selected_events to comparison_groups format
+
     comparison_groups = []
     for idx, event_config in enumerate(selected_events):
         event_marker = event_config.get('event', '')
@@ -208,7 +207,6 @@ def upload_folder_and_analyze():
         if not event_marker or event_marker == '':
             continue
         
-        # Create label for this comparison group
         if event_marker == 'all':
             label = 'Entire Experiment'
         else:
@@ -236,14 +234,13 @@ def upload_folder_and_analyze():
         return jsonify({'error': 'No files in upload'}), 400
     
     try:
-        # Organize files into manifest 
         file_manifest = {
             'emotibit_files': [],
             'respiration_files': [],
             'event_markers': None,  # Single subject backward compatibility
             'event_markers_by_subject': {},  # Multi-subject support
-            'psychopy_files': [],  # PsychoPy data files
-            'psychopy_configs': {},  # PsychoPy configurations
+            'external_files': [],  
+            'external_configs': {},
             'ser_file': None,
             'other_files': []
         }
@@ -268,7 +265,7 @@ def upload_folder_and_analyze():
                     'filename': file.filename,
                     'path': file_path,
                     'relative_path': relative_path,
-                    'subject': subject_name  # Add subject tracking
+                    'subject': subject_name  
                 })
             elif 'respiration_data' in path.lower():
                 file_manifest['respiration_files'].append({
@@ -278,7 +275,6 @@ def upload_folder_and_analyze():
                     'subject': subject_name
                 })
             elif filename_lower.endswith('_event_markers.csv'):
-                # CRITICAL FIX: Support per-subject event markers
                 if batch_mode and subject_name:
                     file_manifest['event_markers_by_subject'][subject_name] = {
                         'filename': file.filename,
@@ -293,16 +289,15 @@ def upload_folder_and_analyze():
                         'path': file_path,
                         'relative_path': relative_path
                     }
-            elif 'psychopy_data' in path.lower() and filename_lower.endswith('.csv'):
-                # NEW: Track PsychoPy files
-                print(f"   ✅ CLASSIFIED AS PSYCHOPY FILE")
-                file_manifest['psychopy_files'].append({
+            elif 'external_data' in path.lower() and filename_lower.endswith('.csv'):
+                print(f"   CLASSIFIED AS EXTERNAL DATA FILE")
+                file_manifest['external_files'].append({
                     'filename': file.filename,
                     'path': file_path,
                     'relative_path': relative_path,
                     'subject': subject_name
                 })
-                print(f"  ✓ PsychoPy file for {subject_name}: {file.filename}")
+                print(f"  External data file for {subject_name}: {file.filename}")
             else:
                 # ============================================================================
                 # DEBUG: Catch unclassified files
@@ -323,10 +318,9 @@ def upload_folder_and_analyze():
             'selected_subjects': selected_subjects
         }
         
-        # Add PsychoPy configuration to manifest
-        if has_psychopy_data and psychopy_configs:
-            file_manifest['psychopy_configs'] = psychopy_configs
-            print(f"✓ Added PsychoPy configs to manifest")
+        if has_external_data and external_configs:
+            file_manifest['external_configs'] = external_configs
+            print(f"Added external data file configs to manifest")
 
         manifest_path = os.path.join(upload_folder, 'file_manifest.json')
         with open(manifest_path, 'w') as f:
@@ -339,22 +333,28 @@ def upload_folder_and_analyze():
         # VALIDATION: Check analysis method and plot type compatibility
         # ============================================================================
         incompatible_combinations = {
-            'mean': ['lineplot', 'scatter'],  # Mean is single value
-            'rmssd': ['poincare'],  # Poincaré is for HRV analysis
+            'mean': ['lineplot', 'scatter', 'boxplot', 'poincare'],  # Mean is single value
+            'rmssd': ['poincare'],  # RMSSD transforms data, incompatible with n vs n+1 Poincaré
+            'moving_average': ['poincare']  # Smoothed data disrupts Poincaré interpretation
         }
         
         if analysis_method in incompatible_combinations:
             if plot_type in incompatible_combinations[analysis_method]:
-                error_msg = f"Plot type '{plot_type}' is incompatible with analysis method '{analysis_method}'. Please choose a different combination."
-                print(f"❌ VALIDATION ERROR: {error_msg}")
+                all_plots = ['lineplot', 'boxplot', 'scatter', 'poincare']
+                valid_plots = [p for p in all_plots if p not in incompatible_combinations[analysis_method]]
+                suggestions = ', '.join(valid_plots)
+                
+                error_msg = (f"Incompatible combination: '{plot_type}' plot cannot be used with '{analysis_method}' analysis. "
+                           f"Valid plot types for {analysis_method}: {suggestions}")
+                print(f"VALIDATION ERROR: {error_msg}")
                 return jsonify({'error': error_msg}), 400
         
         # ============================================================================
         # DEBUG: Print manifest summary
         # ============================================================================
-        print("\n📋 MANIFEST SUMMARY:")
+        print("\nMANIFEST SUMMARY:")
         print(f"  EmotiBit files: {len(file_manifest['emotibit_files'])}")
-        print(f"  PsychoPy files: {len(file_manifest.get('psychopy_files', []))}")
+        print(f"  External files: {len(file_manifest.get('external_files', []))}")
         if batch_mode:
             print(f"  Event markers (by subject): {len(file_manifest.get('event_markers_by_subject', {}))}")
             for subj, em_file in file_manifest.get('event_markers_by_subject', {}).items():
@@ -368,7 +368,6 @@ def upload_folder_and_analyze():
 
         analysis_type = request.form.get('analysis_type', 'inter')
 
-        # Call analysis with all parameters
         results = run_analysis(
             upload_folder=upload_folder,
             manifest=file_manifest,
@@ -380,20 +379,34 @@ def upload_folder_and_analyze():
             output_folder=OUTPUT_FOLDER,
             batch_mode=batch_mode,
             selected_subjects=selected_subjects,
-            psychopy_configs=psychopy_configs,
+            external_configs=external_configs,
             analysis_type=analysis_type
         )
         
         print("Analysis completed successfully")
         
-        # Update plot URLs
         for plot in results.get('plots', []):
             plot['url'] = f"/api/plot/{plot['filename']}"
         
         results['file_manifest'] = file_manifest
         
-        # Save results to JSON file
+        # Clean NaN values from results before JSON serialization
+        def clean_nan(obj):
+            """Recursively replace NaN with None for JSON serialization"""
+            if isinstance(obj, dict):
+                return {k: clean_nan(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [clean_nan(item) for item in obj]
+            elif isinstance(obj, float):
+                if np.isnan(obj) or np.isinf(obj):
+                    return 0.0  
+                return obj
+            else:
+                return obj
+        
+        results = clean_nan(results)
         results_path = os.path.join(OUTPUT_FOLDER, 'results.json')
+
         with open(results_path, 'w') as f:
             json.dump(results, f, indent=2)
         
@@ -493,7 +506,7 @@ def save_images():
 def scan_folder_data():
     """
     Scans provided EmotiBit filenames and optional event markers, 
-    and handles PsychoPy paths (no files uploaded).
+    and handles external data paths (no files uploaded).
     """
     try:
         # --- EmotiBit filenames ---
@@ -511,14 +524,14 @@ def scan_folder_data():
             print(f"Batch mode detected: {len(detected_subjects)} subjects found")
             print(f"Subjects: {detected_subjects}")
 
-        psychopy_metadata_json = request.form.get('psychopy_metadata')
-        psychopy_files_by_subject = {}
+        external_metadata_json = request.form.get('external_metadata')
+        external_files_by_subject = {}
 
-        if psychopy_metadata_json:
-            psychopy_files_by_subject = json.loads(psychopy_metadata_json)
-            print(f"DEBUG: Received PsychoPy metadata for {len(psychopy_files_by_subject)} subject(s)")
+        if external_metadata_json:
+            external_files_by_subject = json.loads(external_metadata_json)
+            print(f"DEBUG: Received external file metadata for {len(external_files_by_subject)} subject(s)")
             
-            for subject, files in psychopy_files_by_subject.items():
+            for subject, files in external_files_by_subject.items():
                 print(f"  Subject {subject}: {len(files)} file(s)")
                 for file_data in files:
                     print(f"    - {file_data['filename']}: {len(file_data.get('columns', []))} columns")
@@ -540,7 +553,6 @@ def scan_folder_data():
                         # Try old format first
                         match = re.search(r'_emotibit_ground_truth_([A-Z0-9%]+)\.csv$', filename)
                         if not match:
-                            # Try new EmotiBit format: 2-4 uppercase letter codes (HR, EDA, PI, PR, PG, TEMP, etc.)
                             match = re.search(r'_([A-Z]{2,4})\.csv$', filename)
                         
                         if match:
@@ -548,7 +560,6 @@ def scan_folder_data():
                             if tag.lower() not in exclude_tags:
                                 subject_availability[subject]['metrics'].add(tag)
 
-            # Event markers
             event_markers_files = request.files.getlist('event_markers_files')
             event_markers_paths = request.form.getlist('event_markers_paths')
             for em_file, em_path in zip(event_markers_files, event_markers_paths):
@@ -599,7 +610,6 @@ def scan_folder_data():
                 # Try old format first
                 match = re.search(r'_emotibit_ground_truth_([A-Z0-9%]+)\.csv$', filename)
                 if not match:
-                    # Try new EmotiBit format: 2-4 uppercase letter codes (HR, EDA, PI, PR, PG, TEMP, etc.)
                     match = re.search(r'_([A-Z]{2,4})\.csv$', filename)
                 
                 if match:
@@ -648,10 +658,10 @@ def scan_folder_data():
             'subjects_count': len(detected_subjects) if detected_subjects else 0,
             'batch_mode': batch_mode,
             'subject_availability': subject_availability_json,
-            'psychopy_data': {
-                'has_files': len(psychopy_files_by_subject) > 0,
-                'files_by_subject': psychopy_files_by_subject,
-                'subjects_with_psychopy': list(psychopy_files_by_subject.keys())
+            'external_data': {
+                'has_files': len(external_files_by_subject) > 0,
+                'files_by_subject': external_files_by_subject,
+                'subjects_with_external': list(external_files_by_subject.keys())
             }
         }), 200
 
@@ -660,372 +670,6 @@ def scan_folder_data():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
-# @app.route('/api/scan-folder-data', methods=['POST'])
-# def scan_folder_data():
-#     """
-#     Scans provided EmotiBit filenames and an optional event markers file to extract available 
-#     metrics, event markers, and conditions.
-    
-#     This route expects a POST request with the following form data:
-#         - 'emotibit_filenames': A JSON-encoded list of EmotiBit CSV filenames.
-#         - 'event_markers_file' (optional): A CSV file containing event markers and conditions.
-    
-#     The function performs the following:
-#         - Parses the filenames to extract unique metric tags, excluding 'timesyncs' and 'timesyncmap'.
-#         - If an event markers file is provided, reads the CSV to extract unique event markers 
-#           (with normalization for PRS markers) and conditions.
-#         - Returns a JSON response containing:
-#             - 'metrics': List of unique metric tags found.
-#             - 'metrics_count': Number of metrics.
-#             - 'event_markers': List of unique event markers found.
-#             - 'event_markers_count': Number of event markers.
-#             - 'conditions': List of unique conditions found.
-#             - 'conditions_count': Number of conditions.
-    
-#     Returns:
-#         Response: JSON object with extracted metrics, event markers, and conditions, 
-#                   or an error message with appropriate HTTP status code.
-#     """
-#     try:
-#         emotibit_filenames_json = request.form.get('emotibit_filenames')
-#         if not emotibit_filenames_json:
-#             return jsonify({'error': 'No emotibit filenames provided'}), 400
-        
-#         emotibit_filenames = json.loads(emotibit_filenames_json)
-#         print(f"Scanning {len(emotibit_filenames)} EmotiBit files")
-        
-#         detected_subjects_json = request.form.get('detected_subjects')
-#         detected_subjects = []
-#         if detected_subjects_json:
-#             detected_subjects = json.loads(detected_subjects_json)
-#             print(f"Batch mode detected: {len(detected_subjects)} subjects found")
-#             print(f"Subjects: {detected_subjects}")
-
-#         # Scan for PsychoPy files
-#         psychopy_files_by_subject = {}
-#         files = request.files.getlist('files') if 'files' in request.files else []
-#         paths = request.form.getlist('paths')
-#         print(f"DEBUG: len(files)={len(files)}, len(paths)={len(paths)}")
-
-#         print(f"\n=== Scanning for PsychoPy files ===")
-#         for file, path in zip(files, paths):
-#             print(f"Checking file: {file.filename}, path: {path}")
-#             if 'psychopy_data' in path.lower() and file.filename.lower().endswith('.csv'):
-#                 parts = path.split('/')
-#                 if len(parts) >= 3:
-#                     subject = parts[1]
-                    
-#                     if subject not in psychopy_files_by_subject:
-#                         psychopy_files_by_subject[subject] = []
-                    
-#                     # Parse experiment type from filename
-#                     # Format: <date>_<subject_name>_<experiment_name>_<experiment_number>.csv
-#                     filename_parts = file.filename.replace('.csv', '').split('_')
-#                     experiment_name = 'Unknown'
-#                     if len(filename_parts) >= 3:
-#                         experiment_name = filename_parts[2] if len(filename_parts) > 2 else filename_parts[-1]
-                    
-#                     print(f"Found PsychoPy file: {file.filename} for subject {subject}, experiment: {experiment_name}")
-                    
-#                     try:
-#                         file_content = file.read()
-#                         try:
-#                             content_str = file_content.decode('utf-8')
-#                         except UnicodeDecodeError:
-#                             content_str = file_content.decode('latin-1')
-                        
-#                         df = pd.read_csv(io.StringIO(content_str))
-                        
-#                         valid_columns = [col for col in df.columns if not str(col).startswith('Unnamed:')]
-#                         df = df[valid_columns]
-                        
-#                         columns = df.columns.tolist()
-#                         column_types = []
-                        
-#                         for col in columns:
-#                             dtype = df[col].dtype
-                            
-#                             if pd.api.types.is_numeric_dtype(dtype):
-#                                 col_type = 'numeric'
-#                             elif pd.api.types.is_datetime64_any_dtype(dtype):
-#                                 col_type = 'datetime'
-#                             else:
-#                                 non_null_values = df[col].dropna()
-#                                 if len(non_null_values) > 0:
-#                                     sample_val = str(non_null_values.iloc[0])
-#                                     if any(pattern in sample_val.lower() for pattern in ['_', ':', 'am', 'pm']) and \
-#                                        any(char.isdigit() for char in sample_val):
-#                                         col_type = 'datetime'
-#                                     else:
-#                                         col_type = 'string'
-#                                 else:
-#                                     col_type = 'string'
-                            
-#                             column_types.append(col_type)
-                        
-#                         # Get sample data (first 5 rows)
-#                         sample_size = min(5, len(df))
-#                         sample_df = df.head(sample_size)
-                        
-#                         sample_data = []
-#                         for idx, row in sample_df.iterrows():
-#                             row_dict = {}
-#                             for col in columns:
-#                                 val = row[col]
-#                                 if pd.isna(val):
-#                                     row_dict[col] = None
-#                                 else:
-#                                     row_dict[col] = val
-#                             sample_data.append(row_dict)
-                        
-#                         psychopy_files_by_subject[subject].append({
-#                             'filename': file.filename,
-#                             'path': path,
-#                             'experiment_name': experiment_name,
-#                             'columns': columns,
-#                             'column_types': column_types,
-#                             'sample_data': sample_data,
-#                             'row_count': len(df)
-#                         })
-                        
-#                         print(f"  Parsed {len(columns)} valid columns, {len(df)} rows")
-#                         file.seek(0)
-                        
-#                     except Exception as e:
-#                         print(f"  ERROR parsing {file.filename}: {str(e)}")
-#                         continue
-        
-#         print(f"=== PsychoPy scan complete: {len(psychopy_files_by_subject)} subject(s) with data ===\n")
-
-#         # BATCH MODE: Multiple subjects
-#         if len(detected_subjects) > 1:
-#             print("\n=== BATCH MODE: Calculating intersection ===\n")
-            
-#             # Initialize per-subject data structures
-#             subject_availability = {}
-#             for subject in detected_subjects:
-#                 subject_availability[subject] = {
-#                     'metrics': set(),
-#                     'event_markers': set(),
-#                     'conditions': set()
-#                 }
-            
-#             # Extract metrics from filenames organized by subject
-#             exclude_tags = {'timesyncs', 'timesyncmap'}
-#             for filename in emotibit_filenames:
-#                 # Extract subject from filename path
-#                 # Assuming format: root/subject_xxx/emotibit_data/file.csv
-#                 parts = filename.split('/')
-#                 if len(parts) >= 3:
-#                     subject = parts[1]
-#                     if subject in subject_availability:
-#                         match = re.search(r'_emotibit_ground_truth_([A-Z0-9%]+)\.csv$', filename)
-#                         if match:
-#                             metric_tag = match.group(1)
-#                             if metric_tag.lower() not in exclude_tags:
-#                                 subject_availability[subject]['metrics'].add(metric_tag)
-            
-#             # Process event markers files (one per subject)
-#             event_markers_files = request.files.getlist('event_markers_files')
-#             event_markers_paths = request.form.getlist('event_markers_paths')
-            
-#             print(f"Processing {len(event_markers_files)} event markers files")
-            
-#             for em_file, em_path in zip(event_markers_files, event_markers_paths):
-#                 parts = em_path.split('/')
-#                 if len(parts) >= 2:
-#                     subject = parts[1]
-#                     print(f"  Processing event markers for subject: {subject}")
-                    
-#                     if subject in subject_availability:
-#                         try:
-#                             file_content = em_file.read()
-#                             try:
-#                                 content_str = file_content.decode('utf-8')
-#                             except UnicodeDecodeError:
-#                                 content_str = file_content.decode('latin-1')
-                            
-#                             df = pd.read_csv(io.StringIO(content_str))
-                            
-#                             if 'event_marker' in df.columns:
-#                                 unique_markers = df['event_marker'].dropna().unique()
-#                                 processed_markers = set()
-#                                 for marker in unique_markers:
-#                                     marker_str = str(marker)
-#                                     if 'prs_' in marker_str.lower():
-#                                         prs_match = re.search(r'(prs_\d+)', marker_str, re.IGNORECASE)
-#                                         if prs_match:
-#                                             processed_markers.add(prs_match.group(1).lower())
-#                                         else:
-#                                             processed_markers.add(marker_str)
-#                                     else:
-#                                         processed_markers.add(marker_str)
-                                
-#                                 subject_availability[subject]['event_markers'].update(processed_markers)
-#                                 print(f"    Found {len(processed_markers)} event markers")
-                            
-#                             if 'condition' in df.columns:
-#                                 unique_conditions = df['condition'].dropna().unique()
-#                                 subject_availability[subject]['conditions'].update([str(c) for c in unique_conditions])
-#                                 print(f"    Found {len(unique_conditions)} conditions")
-                            
-#                             em_file.seek(0)
-#                         except Exception as e:
-#                             print(f"    ERROR processing event markers for {subject}: {e}")
-            
-#             # Calculate intersection across all subjects
-#             if len(subject_availability) > 0:
-#                 subjects_list = list(subject_availability.keys())
-                
-#                 # Metrics intersection
-#                 common_metrics = subject_availability[subjects_list[0]]['metrics'].copy()
-#                 for subject in subjects_list[1:]:
-#                     common_metrics &= subject_availability[subject]['metrics']
-#                 metrics_list = sorted(list(common_metrics))
-                
-#                 # Event markers intersection
-#                 common_markers = subject_availability[subjects_list[0]]['event_markers'].copy()
-#                 for subject in subjects_list[1:]:
-#                     common_markers &= subject_availability[subject]['event_markers']
-#                 event_markers = sorted(list(common_markers))
-                
-#                 # Conditions intersection
-#                 common_conditions = subject_availability[subjects_list[0]]['conditions'].copy()
-#                 for subject in subjects_list[1:]:
-#                     common_conditions &= subject_availability[subject]['conditions']
-#                 conditions = sorted(list(common_conditions))
-                
-#                 print(f"\nIntersection results:")
-#                 print(f"  Common metrics: {len(metrics_list)}")
-#                 print(f"  Common event markers: {len(event_markers)}")
-#                 print(f"  Common conditions: {len(conditions)}")
-#             else:
-#                 metrics_list = []
-#                 event_markers = []
-#                 conditions = []
-            
-#             subject_availability_json = {}
-#             for subject, data in subject_availability.items():
-#                 subject_availability_json[subject] = {
-#                     'metrics': sorted(list(data['metrics'])),
-#                     'event_markers': sorted(list(data['event_markers'])),
-#                     'conditions': sorted(list(data['conditions']))
-#                 }
-            
-#             return jsonify({
-#                 'metrics': metrics_list,
-#                 'metrics_count': len(metrics_list),
-#                 'event_markers': event_markers,
-#                 'event_markers_count': len(event_markers),
-#                 'conditions': conditions,
-#                 'conditions_count': len(conditions),
-#                 'subjects': detected_subjects,
-#                 'subjects_count': len(detected_subjects),
-#                 'batch_mode': True,
-#                 'subject_availability': subject_availability_json,
-#                 'psychopy_data': {
-#                     'has_files': len(psychopy_files_by_subject) > 0,
-#                     'files_by_subject': psychopy_files_by_subject,
-#                     'subjects_with_psychopy': list(psychopy_files_by_subject.keys())
-#                 }
-#             }), 200
-
-#         # SINGLE SUBJECT MODE
-#         else:
-#             print("\n=== SINGLE SUBJECT MODE ===\n")
-            
-#             metrics = set()
-#             exclude_tags = {'timesyncs', 'timesyncmap'}
-            
-#             for filename in emotibit_filenames:
-#                 match = re.search(r'_emotibit_ground_truth_([A-Z0-9%]+)\.csv$', filename)
-#                 if match:
-#                     metric_tag = match.group(1)
-#                     if metric_tag.lower() not in exclude_tags:
-#                         metrics.add(metric_tag)
-            
-#             metrics_list = sorted(list(metrics))
-#             print(f"Found {len(metrics_list)} metrics: {metrics_list}")
-            
-#             event_markers = []
-#             conditions = []
-#             if 'event_markers_file' in request.files:
-#                 event_markers_file = request.files['event_markers_file']
-#                 print(f"Processing event markers file: {event_markers_file.filename}")
-                
-#                 try:
-#                     file_content = event_markers_file.read()
-                    
-#                     try:
-#                         content_str = file_content.decode('utf-8')
-#                     except UnicodeDecodeError:
-#                         content_str = file_content.decode('latin-1')
-                    
-#                     df = pd.read_csv(io.StringIO(content_str))
-                    
-#                     print(f"Event markers CSV columns: {df.columns.tolist()}")
-                    
-#                     if 'event_marker' in df.columns:
-#                         unique_markers = df['event_marker'].dropna().unique()
-                        
-#                         processed_markers = set()
-#                         for marker in unique_markers:
-#                             marker_str = str(marker)
-                            
-#                             if 'prs_' in marker_str.lower():
-#                                 prs_match = re.search(r'(prs_\d+)', marker_str, re.IGNORECASE)
-#                                 if prs_match:
-#                                     normalized_prs = prs_match.group(1).lower()
-#                                     processed_markers.add(normalized_prs)
-#                                 else:
-#                                     processed_markers.add(marker_str)
-#                             else:
-#                                 processed_markers.add(marker_str)
-                        
-#                         event_markers = sorted(list(processed_markers))
-#                         print(f"Found {len(event_markers)} unique event markers: {event_markers}")
-#                     else:
-#                         print(f"WARNING: 'event_marker' column not found in CSV")
-                    
-#                     if 'condition' in df.columns:
-#                         unique_conditions = df['condition'].dropna().unique()
-#                         conditions = sorted([str(cond) for cond in unique_conditions])
-#                         print(f"Found {len(conditions)} unique conditions: {conditions}")
-#                     else:
-#                         print(f"WARNING: 'condition' column not found in CSV")
-                        
-#                 except Exception as e:
-#                     error_msg = f"Error reading event markers file: {str(e)}"
-#                     print(error_msg)
-#                     import traceback
-#                     traceback.print_exc()
-#             else:
-#                 print("No event markers file provided")
-            
-#             return jsonify({
-#                 'metrics': metrics_list,
-#                 'metrics_count': len(metrics_list),
-#                 'event_markers': event_markers,
-#                 'event_markers_count': len(event_markers),
-#                 'conditions': conditions,
-#                 'conditions_count': len(conditions),
-#                 'subjects': detected_subjects if detected_subjects else [],
-#                 'subjects_count': len(detected_subjects) if detected_subjects else 0,
-#                 'batch_mode': False,
-#                 'psychopy_data': {
-#                     'has_files': len(psychopy_files_by_subject) > 0,
-#                     'files_by_subject': psychopy_files_by_subject,
-#                     'subjects_with_psychopy': list(psychopy_files_by_subject.keys())
-#                 }
-#             }), 200
-        
-#     except Exception as e:
-#         error_msg = f"Error scanning folder data: {str(e)}"
-#         print(error_msg)
-#         import traceback
-#         traceback.print_exc()
-#         return jsonify({'error': error_msg}), 500
 
 @app.route('/api/test-timestamp-matching', methods=['POST'])
 def test_timestamp_matching():
@@ -1075,12 +719,10 @@ def test_timestamp_matching():
             print(f"   Filename: {file.filename}")
             print(f"   Path: {path}")
             print(f"   Lowercase path: {path.lower()}")
-            print(f"   Has 'psychopy_data': {'psychopy_data' in path.lower()}")
+            print(f"   Has 'external_data': {'external_data' in path.lower()}")
             print(f"   Ends with .csv: {file.filename.lower().endswith('.csv')}")
             
             filename_lower = file.filename.lower()
-            
-            # Extract subject from path (format: root/subject_xxx/...)
             path_parts = path.split('/')
             subject_name = path_parts[1] if len(path_parts) >= 3 else None
             print(f"   Extracted subject: {subject_name}")
@@ -1182,7 +824,6 @@ def test_timestamp_matching():
         print(error_msg)
         import traceback
         traceback.print_exc()
-        # Clean up on error
         test_folder = os.path.join(UPLOAD_FOLDER, 'test_temp')
         if os.path.exists(test_folder):
             shutil.rmtree(test_folder)

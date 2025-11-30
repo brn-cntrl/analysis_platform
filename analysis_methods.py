@@ -152,11 +152,27 @@ def calculate_statistics(data, metric_col, method='raw'):
             'count': 0
         }
     
+    # Calculate statistics with NaN handling for JSON serialization
+    mean_val = float(values.mean())
+    std_val = float(values.std())
+    min_val = float(values.min())
+    max_val = float(values.max())
+    
+    # Replace NaN with 0 for JSON compatibility (single data point has no std deviation)
+    if np.isnan(std_val):
+        std_val = 0.0
+    if np.isnan(mean_val):
+        mean_val = 0.0
+    if np.isnan(min_val):
+        min_val = 0.0
+    if np.isnan(max_val):
+        max_val = 0.0
+    
     stats = {
-        'mean': float(values.mean()),
-        'std': float(values.std()),
-        'min': float(values.min()),
-        'max': float(values.max()),
+        'mean': mean_val,
+        'std': std_val,
+        'min': min_val,
+        'max': max_val,
         'count': int(len(values))
     }
     
