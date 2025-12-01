@@ -1,14 +1,131 @@
 """
-analysis_methods.py
+BIOMETRIC DATA ANALYSIS MODULE - LLM CONTRACT
+==============================================
 
-Modular analysis methods for biometric data.
-Each method transforms the raw data in a specific way before visualization.
+PURPOSE:
+This module provides statistical analysis methods for time-series biometric data (e.g., heart rate,
+temperature, activity metrics). It transforms raw sensor data into meaningful analytical outputs
+using various signal processing techniques.
+
+CORE CONTRACT:
+--------------
+Input Requirements:
+    - data: pandas DataFrame with at minimum:
+        * 'AdjustedTimestamp': numeric timestamp column (required)
+        * metric_col: numeric column with biometric measurements (required)
+    - metric_col: string name of the column to analyze
+    - method: one of ['raw', 'mean', 'moving_average', 'rmssd']
+
+Output Guarantees:
+    - Returns pandas DataFrame with same schema as input (except 'rmssd' which has n-1 rows)
+    - All numeric values are JSON-serializable (NaN replaced with 0.0)
+    - Original data is never mutated (copies are returned)
+
+ANALYSIS METHODS CONTRACT:
+--------------------------
+
+1. 'raw' - Identity Transform
+   Preconditions: Valid DataFrame with metric_col
+   Postconditions: Returns exact copy of input data
+   Use Case: Baseline visualization, no processing needed
+
+2. 'mean' - Aggregate Statistics
+   Preconditions: metric_col contains numeric data
+   Postconditions: Returns single-row DataFrame with:
+       - AdjustedTimestamp: mean of all timestamps
+       - metric_col: mean of all metric values
+   Use Case: Single summary value for entire dataset
+
+3. 'moving_average' - Temporal Smoothing
+   Preconditions: 
+       - Numeric metric_col
+       - Optional window_size parameter (default=30)
+   Postconditions: Returns DataFrame with same row count where:
+       - metric_col contains smoothed values using centered rolling window
+       - Edge cases handled with min_periods=1
+   Use Case: Noise reduction, trend identification
+   
+4. 'rmssd' - Variability Analysis (Root Mean Square of Successive Differences)
+   Preconditions: metric_col has at least 2 data points
+   Postconditions: Returns DataFrame with n-1 rows where:
+       - metric_col contains successive differences (values[i+1] - values[i])
+       - DataFrame.attrs['rmssd'] contains the RMSSD scalar value
+   Use Case: Heart rate variability, signal stability analysis
+   Mathematical Formula: RMSSD = sqrt(mean(diff(values)^2))
+
+STATISTICS CONTRACT:
+-------------------
+Function: calculate_statistics(data, metric_col, method)
+
+Returns dictionary with guaranteed keys:
+    - 'mean': float (average of values, 0.0 if empty)
+    - 'std': float (standard deviation, 0.0 if empty or single value)
+    - 'min': float (minimum value, 0.0 if empty)
+    - 'max': float (maximum value, 0.0 if empty)
+    - 'count': int (number of non-null values)
+
+Method-specific additions:
+    - 'rmssd' method adds 'rmssd': float key
+    - 'moving_average' method adds 'smoothness': float (coefficient of variation)
+
+NaN Handling: All NaN values are replaced with 0.0 for JSON compatibility
+
+ERROR HANDLING:
+--------------
+- ValueError raised for unknown method names
+- Empty datasets return zeros for all statistics (no exceptions)
+- Missing metric_col will raise KeyError (intentional fail-fast)
+- NaN values in metric_col are dropped before statistics calculation
+
+DEPENDENCIES:
+------------
+- pandas: DataFrame operations
+- numpy: Numerical computations (diff, mean, sqrt)
+- scipy.signal: Imported but unused (reserved for future signal processing)
+
+USAGE EXAMPLES:
+--------------
+
+Example 1 - Get raw data with statistics:
+    >>> processed = apply_analysis_method(df, 'heart_rate', method='raw')
+    >>> stats = calculate_statistics(processed, 'heart_rate', method='raw')
+    >>> print(stats['mean'])  # Average heart rate
+
+Example 2 - Smooth noisy data:
+    >>> smoothed = apply_analysis_method(df, 'temperature', 
+    ...                                   method='moving_average', 
+    ...                                   window_size=60)
+
+Example 3 - Calculate heart rate variability:
+    >>> hrv_data = apply_analysis_method(df, 'heart_rate', method='rmssd')
+    >>> stats = calculate_statistics(hrv_data, 'heart_rate', method='rmssd')
+    >>> print(stats['rmssd'])  # Overall variability measure
+
+Example 4 - Get single summary value:
+    >>> summary = apply_analysis_method(df, 'steps', method='mean')
+    >>> # Returns single row with average steps
+
+INVARIANTS:
+----------
+1. Input DataFrame is never modified (immutability)
+2. Output always has 'AdjustedTimestamp' and metric_col columns
+3. All statistics are JSON-serializable floats/ints
+4. Row count: same as input (except rmssd: n-1, mean: 1)
+5. Column schema preserved (except mean which may reorder)
+
+EXTENSION POINTS:
+----------------
+- Add new methods by extending apply_analysis_method() switch statement
+- Each new method should return DataFrame with compatible schema
+- Update calculate_statistics() for method-specific metrics
+- Add method to get_method_label() for UI display
+
+VERSION: 1.0
+PYTHON: 3.7+
 """
-
 import pandas as pd
 import numpy as np
 from scipy import signal
-
 
 def apply_analysis_method(data, metric_col, method='raw', **kwargs):
     """

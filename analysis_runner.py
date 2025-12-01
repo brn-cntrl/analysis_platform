@@ -1,3 +1,506 @@
+"""
+BIOMETRIC DATA ANALYSIS ORCHESTRATION MODULE - LLM CONTRACT
+===========================================================
+
+PURPOSE:
+This module orchestrates end-to-end biometric data analysis workflows, coordinating data loading,
+event synchronization, metric extraction, statistical analysis, and visualization generation.
+It handles both single-subject and multi-subject studies with configurable analysis methods.
+
+ARCHITECTURE OVERVIEW:
+---------------------
+┌─────────────────────────────────────────────────────────────┐
+│                      run_analysis()                         │
+│                   [Main Orchestrator]                       │
+└──────────┬──────────────────────────────────────────────────┘
+           │
+           ├──► analyze_hrv_from_ppg() ──► generate_hrv_plot()
+           │         [HRV Analysis]
+           │
+           ├──► analyze_metric() ──────────► Single Subject
+           │    [Single Metric Analysis]
+           │
+           └──► analyze_metric_multi_subject() ──► Multi-Subject Comparison
+                [Intra-Subject Analysis]
+
+CORE CONTRACT - run_analysis():
+===============================
+
+Entry Point: Primary analysis orchestration function
+
+Input Requirements:
+    Required:
+        - upload_folder: str, path to subject data directory
+        - manifest: dict with keys:
+            * 'emotibit_files': list of {filename, path, subject} dicts
+            * 'event_markers': dict with {path} OR
+            * 'event_markers_by_subject': dict mapping subjects to event marker files
+            * 'external_files': list (optional)
+        - selected_metrics: list of str, metric names to analyze (e.g., ['HR', 'EDA', 'TEMP'])
+        - comparison_groups: list of dicts with keys:
+            * 'label': str, group name
+            * 'condition': str, event condition filter
+            * 'window_before': float, seconds before event
+            * 'window_after': float, seconds after event
+    
+    Optional:
+        - analysis_method: str, one of ['raw', 'mean', 'moving_average', 'rmssd'] (default='raw')
+        - plot_type: str, one of ['lineplot', 'boxplot', 'scatter', 'poincare', 'barchart'] (default='lineplot')
+        - analyze_hrv: bool, enable HRV analysis (default=False)
+        - batch_mode: bool, multi-subject mode (default=False)
+        - selected_subjects: list of str, subject identifiers (required if batch_mode=True)
+        - analysis_type: str, 'inter' (separate) or 'intra' (compare) (default='inter')
+        - cleaning_enabled: bool, enable data cleaning (default=False)
+        - cleaning_stages: dict, cleaning configuration (default=None)
+
+Output Guarantees:
+    Returns dict with guaranteed structure:
+    {
+        'status': str,           # 'completed' | 'completed_with_errors' | 'processing'
+        'timestamp': str,        # ISO format datetime
+        'errors': list,          # Error messages (empty if success)
+        'warnings': list,        # Warning messages
+        'markers': dict,         # Event marker metadata
+        'analysis': dict,        # {metric: {group: stats}} nested structure
+        'plots': list,           # [{name, path, filename, url}] plot metadata
+        'hrv': dict | None,      # HRV results if analyze_hrv=True
+        'config': dict           # Analysis configuration echo
+    }
+
+Execution Flow:
+    1. Load and validate event markers (single or per-subject)
+    2. [Optional] Perform HRV analysis if analyze_hrv=True
+    3. For each selected metric:
+        a. Route to appropriate analysis function based on mode
+        b. Apply analysis method and generate statistics
+        c. Create visualizations
+    4. Aggregate results and return status
+
+ANALYSIS MODE CONTRACTS:
+========================
+
+MODE 1: Single Subject Analysis
+--------------------------------
+Trigger: batch_mode=False OR (batch_mode=True AND len(selected_subjects)==1)
+Behavior:
+    - Analyzes one subject's data
+    - Matches metric files to event markers by subject identifier
+    - Generates individual plots for that subject
+Output: results['analysis'][metric] = {group_label: stats}
+
+MODE 2: Inter-Subject Analysis (Parallel)
+------------------------------------------
+Trigger: batch_mode=True AND analysis_type='inter' AND len(selected_subjects)>=1
+Behavior:
+    - Analyzes each subject INDEPENDENTLY in sequence
+    - Each subject gets separate event marker file and metric files
+    - Generates separate plots per subject
+    - Results are namespaced by subject
+Output: results['analysis'][metric][f"{subject} - {group}"] = stats
+Use Case: Compare how different subjects respond to same events
+
+MODE 3: Intra-Subject Analysis (Comparison)
+--------------------------------------------
+Trigger: batch_mode=True AND analysis_type='intra' AND len(selected_subjects)>=2
+Behavior:
+    - Combines multiple subjects into single analysis
+    - Creates composite labels: "{subject} - {event_group}"
+    - Generates unified comparison visualizations
+    - All subjects on same plot for direct comparison
+Output: results['analysis'][metric] = {composite_label: stats}
+Use Case: Compare subjects side-by-side during same events
+Limitation: HRV analysis disabled (prevents timeout, 30-75s per subject)
+
+FUNCTION CONTRACT - analyze_metric():
+=====================================
+
+Purpose: Single metric analysis for one subject
+
+Input Requirements:
+    - metric_file: str, path to CSV with columns [LocalTimestamp, ..., metric_value]
+    - df_markers: DataFrame with event markers (from prepare_event_markers_timestamps)
+    - comparison_groups: list of group configurations
+    - metric: str, metric identifier (e.g., 'HR', 'EDA')
+    - analysis_method: str, processing method
+    - plot_type: str, visualization type
+    - output_folder: str, plot save directory
+    - subject_suffix: str, optional filename suffix (default='')
+    - subject_label: str, optional display label (default='')
+    - cleaning_enabled: bool, apply data cleaning (default=False)
+    - cleaning_stages: dict, cleaning configuration (default=None)
+
+Output:
+    Tuple: (metric_results: dict, plots: list)
+    - metric_results: {group_label: {mean, std, min, max, count, ...}}
+    - plots: [{name, path, filename, url}]
+    
+Returns (None, []) if:
+    - All data removed during cleaning
+    - No groups contain data
+    - Processing fails for all groups
+
+Processing Pipeline:
+    1. Load metric CSV file
+    2. [Optional] Apply data cleaning if cleaning_enabled=True
+    3. Calculate timestamp offset between markers and metric data
+    4. Extract windowed data for each comparison group
+    5. Apply analysis method (raw/mean/moving_average/rmssd)
+    6. Calculate statistics per group
+    7. Generate visualization(s)
+
+Data Cleaning Contract:
+    If cleaning_enabled=True:
+        - Uses BiometricDataCleaner with metric-specific validation rules
+        - Checks for wrong units (e.g., HR in milliseconds vs BPM)
+        - Removes outliers beyond physiologically valid ranges
+        - If ALL data removed → returns (None, []) with error message
+        - Preserves timestamp column 'LocalTimestamp'
+
+FUNCTION CONTRACT - analyze_metric_multi_subject():
+===================================================
+
+Purpose: Multi-subject comparison analysis (intra-subject mode)
+
+Input Requirements:
+    - manifest: dict, full file manifest with all subjects
+    - selected_subjects: list of str, subject identifiers
+    - comparison_groups: list of group configurations
+    - metric: str, metric identifier
+    - analysis_method: str, processing method
+    - plot_type: str, visualization type
+    - output_folder: str, plot save directory
+    - cleaning_enabled: bool (default=False)
+    - cleaning_stages: dict (default=None)
+
+Output:
+    Tuple: (metric_results: dict, plots: list)
+    - metric_results: {f"{subject} - {group}": stats}
+    - plots: unified visualizations with all subjects
+
+Processing Pipeline:
+    1. For each subject:
+        a. Load subject-specific metric file and event markers
+        b. [Optional] Apply data cleaning
+        c. Calculate timestamp offset
+        d. Extract windowed data for each comparison group
+        e. Create composite label: f"{subject} - {group_label}"
+    2. Apply analysis method to all subject-group combinations
+    3. Calculate statistics for all combinations
+    4. Generate unified comparison visualizations
+
+Composite Labeling:
+    Format: "{subject_name} - {event_group_label}"
+    Example: "P001 - Baseline", "P001 - Stress", "P002 - Baseline", "P002 - Stress"
+    Purpose: Enable cross-subject comparison in single visualization
+
+FUNCTION CONTRACT - analyze_hrv_from_ppg():
+===========================================
+
+Purpose: Heart Rate Variability analysis from Photoplethysmography signals
+
+Input Requirements:
+    - manifest: dict with 'emotibit_files' containing '_PI.csv' (infrared PPG)
+    - df_markers: DataFrame (currently unused, reserved for windowed HRV)
+    - comparison_groups: list (currently unused, reserved for future)
+    - output_folder: str, plot save directory
+
+Output:
+    Tuple: (hrv_results: dict, hrv_plots: list)
+    
+    hrv_results structure:
+    {
+        'num_peaks': int,              # Total R-peaks detected
+        'duration_minutes': float,     # Recording duration
+        'average_hr_bpm': float,      # Average heart rate
+        'sampling_rate': int,          # PPG sampling frequency
+        'indices': {                   # HRV metrics from neurokit2
+            'HRV_RMSSD': float,       # Time domain
+            'HRV_SDNN': float,        # Time domain
+            'HRV_LF': float,          # Frequency domain (low frequency)
+            'HRV_HF': float,          # Frequency domain (high frequency)
+            'HRV_SD1': float,         # Non-linear (Poincaré)
+            'HRV_SD2': float,         # Non-linear (Poincaré)
+            # ... additional HRV indices
+        }
+    }
+    
+    hrv_plots: 4 visualizations
+        1. PPG signal with detected peaks
+        2. Time domain analysis
+        3. Frequency domain analysis  
+        4. Non-linear analysis (Poincaré plot)
+
+Processing Pipeline:
+    1. Locate and load '_PI.csv' (infrared PPG signal)
+    2. Clean PPG signal using neurokit2.ppg_clean()
+    3. Detect R-peaks using neurokit2.ppg_process()
+    4. Calculate HRV indices using neurokit2.hrv()
+    5. Generate 4 standardized HRV plots
+
+Limitations:
+    - Analyzes ENTIRE recording (no windowing by events yet)
+    - Requires continuous PPG data
+    - Disabled in intra-subject mode (timeout risk: 30-75s per subject)
+
+FUNCTION CONTRACT - generate_hrv_plot():
+========================================
+
+Purpose: Create individual HRV visualization with consistent formatting
+
+Input Requirements:
+    - data: varies by plot_type (signals DataFrame, peaks array, etc.)
+    - param: varies by plot_type (info dict, sampling_rate int, etc.)
+    - plot_type: str, one of ['signal', 'time', 'frequency', 'nonlinear']
+    - output_folder: str, save directory
+
+Output:
+    dict | None
+    Success: {'name': str, 'path': str, 'filename': str, 'url': str}
+    Failure: None (exception caught)
+
+Plot Type Specifications:
+    'signal':
+        - Size: 20×22 inches
+        - Shows: Raw PPG + detected peaks overlay
+        - Data: (signals DataFrame, info dict)
+        
+    'time':
+        - Size: 20×20 inches
+        - Shows: Time domain metrics (RMSSD, SDNN, pNN50, etc.)
+        - Data: (peaks array, sampling_rate int)
+        
+    'frequency':
+        - Size: 20×18 inches
+        - Shows: Power spectral density (LF, HF, VLF bands)
+        - Data: (peaks array, sampling_rate int)
+        
+    'nonlinear':
+        - Size: 22×20 inches
+        - Shows: Poincaré plot, DFA, sample entropy
+        - Data: (peaks array, sampling_rate int)
+
+Format Standards:
+    - DPI: 100
+    - Font sizes: Title=24, axis labels=16, ticks=12-18
+    - Saved as PNG with tight bounding box
+    - URL format: '/api/plot/{filename}'
+
+ERROR HANDLING PHILOSOPHY:
+=========================
+
+Graceful Degradation:
+    - Individual metric failures don't stop entire analysis
+    - Errors collected in results['errors'] list
+    - Warnings collected in results['warnings'] list
+    - Status reflects overall health: 'completed' | 'completed_with_errors'
+
+Fail-Fast Scenarios:
+    - Missing event markers → early return with error
+    - Invalid manifest structure → KeyError propagates
+    - Empty selected_metrics → skips analysis section
+
+Recoverable Scenarios:
+    - Missing metric file for one metric → skip that metric, continue others
+    - Empty data after cleaning → skip that subject/metric, log warning
+    - Plot generation failure → continue without that plot
+
+Logging Contract:
+    - Console output to stdout with structured sections (====, ----)
+    - Progress indicators for long operations
+    - Error details with traceback for debugging
+    - Final summary with counts (plots, metrics, errors, warnings)
+
+TIMESTAMP SYNCHRONIZATION:
+=========================
+
+Challenge: Event markers and biometric sensors use different clocks
+
+Solution: find_timestamp_offset() calculates alignment
+    - Compares marker timestamps with metric data timestamps
+    - Handles timezone differences and clock drift
+    - Returns offset value (seconds) to align streams
+
+Contract:
+    offset = find_timestamp_offset(df_markers, df_metric)
+    Postcondition: metric_timestamp + offset ≈ marker_timestamp (aligned)
+
+WINDOWING CONTRACT:
+==================
+
+Function: extract_window_data(df_metric, df_markers, offset, group)
+
+Purpose: Extract metric data surrounding specific events
+
+Group Configuration:
+    {
+        'label': str,           # Human-readable name
+        'condition': str,       # Event type to match
+        'window_before': float, # Seconds before event
+        'window_after': float   # Seconds after event
+    }
+
+Behavior:
+    1. Find all event markers matching group['condition']
+    2. For each matching event:
+        a. Calculate window: [event_time - before, event_time + after]
+        b. Extract metric rows within window
+        c. Adjust timestamps relative to event (t=0 at event)
+    3. Concatenate all windows into single DataFrame
+    4. Add 'AdjustedTimestamp' column (relative to event onset)
+
+Returns: DataFrame with schema [AdjustedTimestamp, metric_col]
+
+DEPENDENCIES:
+============
+
+External Libraries:
+    - pandas: Data manipulation
+    - numpy: Numerical operations
+    - matplotlib: Plotting (Agg backend for headless)
+    - neurokit2: HRV analysis
+    - scipy: Signal processing (via analysis_methods)
+
+Internal Modules:
+    - analysis_utils: Data loading, timestamp sync, windowing
+    - analysis_methods: Statistical transformations
+    - plot_generator: Visualization creation
+    - DataCleaner: Biometric data validation (optional)
+
+File System:
+    - Requires write access to output_folder
+    - Creates directory if not exists
+    - Generates PNG files with deterministic naming
+
+PLOT NAMING CONVENTIONS:
+=======================
+
+Format: {metric}_{plot_type}_{analysis_method}{suffix}.png
+
+Examples:
+    - HR_lineplot_raw.png
+    - EDA_boxplot_moving_average_P001.png
+    - TEMP_comparison_mean_multi_subject.png
+    - HRV_ppg_signal.png (HRV plots have fixed names)
+
+Special Cases:
+    - Comparison plots: {metric}_comparison_{method}{suffix}.png
+    - HRV plots: HRV_{domain}.png where domain in [ppg_signal, time_domain, frequency_domain, nonlinear]
+
+USAGE EXAMPLES:
+==============
+
+Example 1 - Single Subject, Basic Analysis:
+    >>> manifest = {
+    ...     'emotibit_files': [
+    ...         {'filename': 'subject1_HR.csv', 'path': '/data/subject1_HR.csv', 'subject': 'subject1'},
+    ...         {'filename': 'subject1_EDA.csv', 'path': '/data/subject1_EDA.csv', 'subject': 'subject1'}
+    ...     ],
+    ...     'event_markers': {'path': '/data/subject1_events.csv'}
+    ... }
+    >>> groups = [
+    ...     {'label': 'Baseline', 'condition': 'rest', 'window_before': 30, 'window_after': 30},
+    ...     {'label': 'Stress', 'condition': 'task', 'window_before': 10, 'window_after': 60}
+    ... ]
+    >>> results = run_analysis(
+    ...     upload_folder='/data',
+    ...     manifest=manifest,
+    ...     selected_metrics=['HR', 'EDA'],
+    ...     comparison_groups=groups,
+    ...     analysis_method='moving_average',
+    ...     plot_type='lineplot'
+    ... )
+    >>> print(results['status'])  # 'completed'
+    >>> print(len(results['plots']))  # 4 plots (2 metrics × 2 plot types)
+
+Example 2 - Multi-Subject Comparison (Intra):
+    >>> manifest = {...}  # Contains multiple subjects
+    >>> results = run_analysis(
+    ...     upload_folder='/data',
+    ...     manifest=manifest,
+    ...     selected_metrics=['HR'],
+    ...     comparison_groups=groups,
+    ...     batch_mode=True,
+    ...     selected_subjects=['P001', 'P002', 'P003'],
+    ...     analysis_type='intra',  # Compare subjects together
+    ...     plot_type='boxplot'
+    ... )
+    >>> # Results contain composite labels like "P001 - Baseline", "P002 - Baseline"
+
+Example 3 - Multi-Subject Separate Analysis (Inter):
+    >>> results = run_analysis(
+    ...     upload_folder='/data',
+    ...     manifest=manifest,
+    ...     selected_metrics=['HR', 'EDA'],
+    ...     comparison_groups=groups,
+    ...     batch_mode=True,
+    ...     selected_subjects=['P001', 'P002'],
+    ...     analysis_type='inter',  # Analyze each separately
+    ...     analyze_hrv=True
+    ... )
+    >>> # Each subject gets independent analysis and plots
+
+Example 4 - HRV Analysis with Data Cleaning:
+    >>> results = run_analysis(
+    ...     upload_folder='/data',
+    ...     manifest=manifest,
+    ...     selected_metrics=['HR'],
+    ...     comparison_groups=groups,
+    ...     analyze_hrv=True,
+    ...     cleaning_enabled=True,
+    ...     cleaning_stages={'remove_outliers': True, 'check_units': True}
+    ... )
+    >>> print(results['hrv']['indices']['HRV_RMSSD'])  # Root mean square of successive differences
+
+INVARIANTS:
+==========
+
+1. Output Structure: results dict always contains all top-level keys, even if empty
+2. Plot Files: All generated plots physically exist at returned paths
+3. Timestamp Alignment: Within-group data shares consistent time reference
+4. Immutability: Input DataFrames never modified (copies used)
+5. Status Accuracy: status='completed' IFF len(errors)==0
+6. Plot Determinism: Same inputs → same plot filenames (supports caching)
+7. Metric Column: Last column of metric CSV is always the metric value column
+
+CONFIGURATION ECHO:
+==================
+
+results['config'] contains exact parameters used:
+    - Enables reproducibility
+    - Documents analysis provenance  
+    - Supports audit trails
+    - Facilitates result interpretation
+
+PERFORMANCE CHARACTERISTICS:
+===========================
+
+Complexity:
+    - Time: O(n_subjects × n_metrics × n_groups × n_samples)
+    - Space: O(n_samples) per metric (windowed data in memory)
+
+HRV Timing:
+    - Single subject: 30-75 seconds (neurokit2 processing)
+    - Multi-subject intra: DISABLED (timeout risk)
+    - Multi-subject inter: n × (30-75s) sequential
+
+Timeout Mitigation:
+    - HRV disabled for intra-subject mode with multiple subjects
+    - Explicit warning messages guide user to inter-subject mode
+
+EXTENSION POINTS:
+================
+
+1. New Analysis Methods: Add to analysis_methods module, update method_label mapping
+2. New Plot Types: Extend plot_generator module
+3. New Metrics: Add CSV files with standard format [LocalTimestamp, ..., value]
+4. Event-Windowed HRV: Uncomment/implement df_markers usage in analyze_hrv_from_ppg
+5. Custom Cleaning Rules: Extend DataCleaner with metric-specific validators
+
+VERSION: 1.0
+PYTHON: 3.8+
+REQUIRES: pandas>=1.3, numpy>=1.20, matplotlib>=3.3, neurokit2>=0.1
+"""
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt

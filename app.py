@@ -1,3 +1,561 @@
+"""
+BIOMETRIC DATA ANALYSIS WEB API - LLM CONTRACT
+==============================================
+
+PURPOSE:
+Flask REST API server providing web interface for biometric sensor data upload, processing,
+and analysis. Handles multi-subject studies, real-time analysis orchestration, authentication,
+and result visualization serving. Designed for educational/research use with EmotiBit wearable sensors.
+
+ARCHITECTURE:
+------------
+┌──────────────────────────────────────────────────────────────┐
+│                    Flask API Server                          │
+│  (Port 5001, CORS enabled, 500MB upload limit)               │
+└───────────────┬──────────────────────────────────────────────┘
+                │
+                ├─► User Management (login, register)
+                ├─► File Upload & Organization (folder structure)
+                ├─► Data Scanning (metrics, events, subjects detection)
+                ├─► Analysis Orchestration (run_analysis integration)
+                ├─► Results Serving (plots, JSON, images)
+                └─► Testing Tools (timestamp validation)
+
+ENDPOINT CONTRACTS:
+==================
+
+POST /api/register
+------------------
+Purpose: Create new user account with auto-generated student ID
+
+Input (JSON):
+    {
+        "first_name": str,    # Required
+        "last_name": str,     # Required
+        "email": str          # Required
+    }
+
+Output Success (201):
+    {
+        "success": true,
+        "student_id": str,    # Format: {first_initial}{lastname}{year}[_{counter}]
+        "name": str           # Full name
+    }
+
+Output Error (400):
+    {"error": "First name, last name, and email are required"}
+
+ID Generation:
+    - Format: first_initial + lastname + year + optional_counter
+    - Example: "jdoe2024", "jdoe2024_1" (if collision)
+    - Stored in: data/students.json
+
+POST /api/login
+---------------
+Purpose: Authenticate existing user
+
+Input (JSON):
+    {"student_id": str}
+
+Output Success (200):
+    {"success": true, "name": str}
+
+Output Error (404):
+    {"error": "Student ID not found"}
+
+POST /api/launch-emotibit-parser
+--------------------------------
+Purpose: Launch external EmotiBit DataParser application (macOS)
+
+Output Success (200):
+    {"success": true, "message": "EmotiBit DataParser launched successfully"}
+
+Output Error (500):
+    {"success": false, "error": str}
+
+Implementation:
+    subprocess.Popen(['open', 'executables/EmotiBitDataParser.app'])
+    
+Note: macOS-specific, requires porting for Windows (.exe extension)
+
+POST /api/upload-folder-and-analyze
+-----------------------------------
+Purpose: Main analysis endpoint - upload files, organize, and run complete analysis
+
+Input (multipart/form-data):
+    Required:
+        - files: list[File]                 # All CSV files in folder structure
+        - paths: list[str]                  # Relative paths for folder reconstruction
+        - selected_metrics: JSON str        # ['HR', 'EDA', 'TEMP']
+        - selected_events: JSON str         # [{"event": str, "condition": str}]
+    
+    Optional:
+        - student_id: str                   # Default: 'unknown'
+        - folder_name: str                  # Default: 'subject_data'
+        - analysis_method: str              # Default: 'raw'
+        - plot_type: str                    # Default: 'lineplot'
+        - analyze_hrv: JSON bool            # Default: false
+        - batch_mode: str                   # 'true' | 'false'
+        - selected_subjects: JSON list      # Required if batch_mode=true
+        - analysis_type: str                # 'inter' | 'intra'
+        - cleaning_enabled: JSON bool       # Default: false
+        - cleaning_stages: JSON dict        # Cleaning configuration
+        - has_external_data: str            # 'true' | 'false'
+        - external_configs: JSON str        # External file configurations
+
+Output Success (200):
+    {
+        "message": "Analysis completed successfully",
+        "results": {
+            "status": str,              # 'completed' | 'completed_with_errors'
+            "timestamp": str,           # ISO format
+            "errors": list[str],
+            "warnings": list[str],
+            "markers": dict,            # Event marker metadata
+            "analysis": dict,           # {metric: {group: stats}}
+            "plots": list[dict],        # Plot metadata with URLs
+            "hrv": dict | None,         # HRV results if enabled
+            "config": dict              # Analysis configuration echo
+        },
+        "folder_name": str
+    }
+
+Output Error (400/500):
+    {"error": str}
+
+File Organization:
+    Uploaded to: data/{student_id}/{folder_name}/
+    Structure preserved from client-side paths
+    Manifest saved: file_manifest.json
+
+File Classification:
+    - 'emotibit_data/' in path → emotibit_files
+    - 'respiration_data/' in path → respiration_files
+    - Ends with '_event_markers.csv' → event_markers or event_markers_by_subject
+    - 'external_data/' in path + .csv → external_files
+    - Other → other_files
+
+Validation:
+    Checks analysis_method + plot_type compatibility:
+        - 'mean' incompatible with: lineplot, scatter, boxplot, poincare
+        - 'rmssd' incompatible with: poincare
+        - 'moving_average' incompatible with: poincare
+    Returns 400 with suggestions if incompatible
+
+Analysis Flow:
+    1. Upload & organize files
+    2. Build file manifest
+    3. Transform selected_events to comparison_groups
+    4. Run analysis via run_analysis()
+    5. Clean NaN from results (JSON serialization)
+    6. Save results.json
+    7. Return results with plot URLs
+
+POST /api/scan-folder-data
+--------------------------
+Purpose: Scan uploaded files to detect available metrics, events, subjects without running analysis
+
+Input (multipart/form-data):
+    Required:
+        - emotibit_filenames: JSON str      # List of EmotiBit CSV filenames
+    
+    Optional:
+        - detected_subjects: JSON str       # List of subject identifiers (batch mode)
+        - event_markers_file: File          # Single subject event markers
+        - event_markers_files: list[File]   # Multi-subject event markers
+        - event_markers_paths: list[str]    # Paths for multi-subject markers
+        - external_metadata: JSON str       # {subject: [{filename, columns}]}
+
+Output Success (200):
+    {
+        "metrics": list[str],               # Detected metric types
+        "metrics_count": int,
+        "event_markers": list[str],         # Unique event marker names
+        "event_markers_count": int,
+        "conditions": list[str],            # Unique condition values
+        "conditions_count": int,
+        "subjects": list[str],              # Detected subject IDs
+        "subjects_count": int,
+        "batch_mode": bool,                 # True if multiple subjects
+        "subject_availability": dict,       # Per-subject metrics/events/conditions
+        "external_data": {
+            "has_files": bool,
+            "files_by_subject": dict,       # {subject: [file metadata]}
+            "subjects_with_external": list[str]
+        }
+    }
+
+Metric Detection:
+    Patterns: '_emotibit_ground_truth_{TAG}.csv' OR '_{TAG}.csv'
+    Where TAG: 2-4 uppercase letters (HR, EDA, TEMP, PI, PR, PG, etc.)
+    Excludes: 'timesyncs', 'timesyncmap'
+
+Event Marker Processing:
+    - Normalizes 'prs_' prefixed markers (case-insensitive)
+    - Extracts unique event_marker column values
+    - Extracts unique condition column values
+
+Batch Mode Logic:
+    If detected_subjects provided:
+        - Computes intersection of available metrics/events across ALL subjects
+        - Returns per-subject availability for detailed view
+    Else:
+        - Single subject mode
+        - Returns union of all available metrics/events
+
+POST /api/test-timestamp-matching
+---------------------------------
+Purpose: Validate timestamp synchronization quality (debugging tool)
+
+Input (multipart/form-data):
+    - files: list[File]                 # Event markers + metric file
+    - paths: list[str]                  # File paths
+    - selected_metric: str              # Metric to test (e.g., 'HR')
+
+Output Success (200):
+    {
+        "message": "Timestamp alignment test completed",
+        "metric": str,
+        "offset_seconds": float,        # Calculated offset
+        "offset_hours": float,          # Offset in hours
+        "total_sampled": int,           # Number of timestamps tested
+        "matches_within_tolerance": int, # Matches within 2s
+        "avg_time_diff": float,         # Average difference (seconds)
+        "max_time_diff": float,         # Maximum difference
+        "min_time_diff": float          # Minimum difference
+    }
+
+Output Error (400/404/500):
+    {"error": str}
+
+Algorithm:
+    1. Upload files to temporary folder
+    2. Load event markers and metric file
+    3. Calculate offset via find_timestamp_offset()
+    4. Sample 100 timestamps (or fewer if less available)
+    5. For each sample: find closest biometric timestamp
+    6. Calculate alignment statistics
+    7. Clean up temporary folder
+    8. Return quality metrics
+
+Quality Thresholds:
+    - Good: avg_time_diff < 1.0s
+    - Acceptable: avg_time_diff < 2.0s (tolerance)
+    - Poor: avg_time_diff > 2.0s
+
+GET /api/plot/<filename>
+------------------------
+Purpose: Serve generated plot images
+
+Output Success (200):
+    PNG image file (mimetype: 'image/png')
+
+Output Error (404):
+    {"error": "Plot not found"}
+
+Implementation:
+    send_file(data/outputs/{filename}, mimetype='image/png')
+
+GET /api/results
+----------------
+Purpose: Retrieve most recent analysis results
+
+Output Success (200):
+    Same structure as upload-folder-and-analyze results
+
+Output Error (404):
+    {"error": "No results available"}
+
+Implementation:
+    Loads: data/outputs/results.json
+    Updates plot URLs to /api/plot/{filename}
+
+POST /api/save_images
+---------------------
+Purpose: Copy generated plots to student-specific folder
+
+Input (JSON):
+    {"folder_name": str}
+
+Output Success (200):
+    {"message": "Images saved to {target_folder}"}
+
+Output Error (500):
+    {"error": str}
+
+Behavior:
+    Copies all .png files from data/outputs/ to data/{folder_name}/
+
+GET /
+GET /<path>
+-----------
+Purpose: Serve React frontend (catch-all for SPA routing)
+
+Output: Frontend index.html
+
+Implementation:
+    serve_from_directory('frontend/build', 'index.html')
+
+FILE SYSTEM STRUCTURE:
+=====================
+
+data/
+├── students.json                       # User database
+├── {student_id}/
+│   └── {folder_name}/
+│       ├── file_manifest.json          # File organization metadata
+│       ├── {subject}/
+│       │   ├── emotibit_data/
+│       │   │   ├── *_HR.csv
+│       │   │   ├── *_EDA.csv
+│       │   │   └── ...
+│       │   ├── external_data/          # Optional external files
+│       │   │   └── *.csv
+│       │   └── {subject}_event_markers.csv
+│       └── ...
+└── outputs/
+    ├── results.json                    # Latest analysis results
+    ├── HR_lineplot.png
+    ├── EDA_boxplot.png
+    └── ...
+
+FILE MANIFEST STRUCTURE:
+========================
+
+{
+    "emotibit_files": [
+        {
+            "filename": str,
+            "path": str,                # Absolute path
+            "relative_path": str,       # Relative to upload folder
+            "subject": str              # Subject identifier
+        },
+        ...
+    ],
+    "respiration_files": [...],         # Same structure
+    "event_markers": {                  # Single subject (backward compat)
+        "filename": str,
+        "path": str,
+        "relative_path": str
+    },
+    "event_markers_by_subject": {       # Multi-subject
+        "{subject}": {
+            "filename": str,
+            "path": str,
+            "relative_path": str
+        },
+        ...
+    },
+    "external_files": [...],            # Same structure as emotibit_files
+    "external_configs": {               # External file metadata
+        "{subject}": {
+            "file_configs": [...]
+        }
+    },
+    "analysis_config": {                # Analysis parameters
+        "selected_metrics": list[str],
+        "comparison_groups": list[dict],
+        "analysis_method": str,
+        "plot_type": str,
+        "batch_mode": bool,
+        "selected_subjects": list[str]
+    }
+}
+
+COMPARISON GROUP TRANSFORMATION:
+================================
+
+Frontend selected_events format:
+    [{"event": str, "condition": str}, ...]
+
+Backend comparison_groups format:
+    [
+        {
+            "label": str,               # Display name
+            "eventMarker": str,         # Event name to match
+            "conditionMarker": str,     # Condition filter (empty for all)
+            "timeWindowType": "full",   # Always full window
+            "customStart": 0,
+            "customEnd": 0
+        },
+        ...
+    ]
+
+Label Generation:
+    - event='all' → 'Entire Experiment'
+    - event='stimulus', condition='all' → 'stimulus'
+    - event='stimulus', condition='hard' → 'stimulus (hard)'
+
+ERROR HANDLING:
+==============
+
+Strategy: Try-catch at endpoint level, detailed logging
+
+HTTP Status Codes:
+    - 200: Success
+    - 201: Created (register)
+    - 400: Bad request (validation errors, incompatible parameters)
+    - 404: Not found (student, file, results)
+    - 500: Server error (exceptions, analysis failures)
+
+NaN Handling:
+    Function clean_nan() recursively replaces NaN/inf with 0.0 for JSON serialization
+    Applied to analysis results before returning
+
+Temporary Folder Cleanup:
+    test-timestamp-matching creates 'test_temp' folder
+    Guaranteed cleanup in try/finally or after success/error
+
+Debug Logging:
+    Extensive print statements for request inspection
+    File classification debugging
+    Analysis progress tracking
+
+CONFIGURATION:
+=============
+
+Flask App Settings:
+    - Max upload: 500MB (MAX_CONTENT_LENGTH)
+    - CORS: Enabled (development)
+    - Static folder: frontend/build (React SPA)
+    - Debug mode: True (development)
+    - Port: 5001
+
+Allowed File Extensions:
+    ALLOWED_EXTENSIONS = {'csv'}
+    Enforced via allowed_file() check
+
+Directories:
+    - UPLOAD_FOLDER = 'data'
+    - OUTPUT_FOLDER = 'data/outputs'
+    - STUDENTS_FILE = 'data/students.json'
+
+Security:
+    - werkzeug.utils.secure_filename() for all user-provided paths
+    - Prevents directory traversal attacks
+
+INTEGRATION POINTS:
+==================
+
+Analysis Modules:
+    - analysis_utils: Timestamp functions, file utilities
+    - analysis_runner: run_analysis() orchestration
+    - analysis_methods: Applied via run_analysis
+    - plot_generator: Used via run_analysis
+    - DataCleaner: Optional cleaning pipeline
+
+Frontend Communication:
+    - Expects React SPA at frontend/build/
+    - CORS enabled for development
+    - JSON request/response format
+    - Multipart file uploads
+
+External Tools:
+    - EmotiBit DataParser: macOS application launch
+    - subprocess.Popen for external process
+
+DEPENDENCIES:
+============
+
+Flask Ecosystem:
+    - flask: Web framework
+    - flask-cors: Cross-origin support
+    - werkzeug: Security utilities
+
+Data Processing:
+    - pandas: CSV reading, event marker processing
+    - numpy: NaN handling, numerical operations
+
+Standard Library:
+    - os, shutil: File system operations
+    - json: JSON serialization
+    - io: StringIO for CSV parsing
+    - re: Regex for metric/event detection
+    - datetime: Timestamps
+    - subprocess: External application launch
+
+TYPICAL REQUEST FLOW:
+====================
+
+1. User Authentication:
+    POST /api/login OR /api/register
+    → Get student_id
+
+2. File Upload:
+    POST /api/upload-folder-and-analyze
+    → Files organized in data/{student_id}/{folder_name}/
+    → Manifest created
+    → Analysis runs
+    → Results saved to data/outputs/results.json
+    → Response includes results + plot URLs
+
+3. View Results:
+    GET /api/results
+    → Returns saved results
+
+4. View Plot:
+    GET /api/plot/{filename}
+    → Serves PNG image
+
+Alternative Flow (Pre-scan):
+    POST /api/scan-folder-data
+    → Returns available metrics/events
+    → User selects configuration
+    → POST /api/upload-folder-and-analyze
+
+PERFORMANCE CONSIDERATIONS:
+==========================
+
+Upload Limits:
+    - 500MB maximum request size
+    - No file count limit
+    - Timeout risk for large datasets (consider async for production)
+
+Analysis Duration:
+    - Single subject: 1-30 seconds
+    - Multi-subject (inter): n × 1-30 seconds
+    - HRV analysis: +30-75 seconds per subject
+    - Recommend timeout handling for >5 subjects
+
+Memory Management:
+    - Files kept on disk (not in memory)
+    - Temporary folders cleaned up
+    - Matplotlib figures explicitly closed
+
+File System:
+    - No automatic cleanup of old analyses
+    - User folders accumulate (consider retention policy)
+    - Outputs folder overwritten on each analysis
+
+DEPLOYMENT NOTES:
+================
+
+Development:
+    python app.py
+    → Runs on http://localhost:5001
+    → Debug mode enabled
+    → CORS allows all origins
+
+Production Considerations:
+    - Use WSGI server (Gunicorn, uWSGI)
+    - Disable debug mode
+    - Configure CORS for specific origin
+    - Add authentication/authorization
+    - Implement rate limiting
+    - Add request timeout handling
+    - Set up log rotation
+    - Consider async task queue (Celery) for long analyses
+
+Platform Porting:
+    - macOS: Works as-is
+    - Windows: Update EmotiBitDataParser launch (.exe, different subprocess)
+    - Linux: Update EmotiBitDataParser launch
+
+VERSION: 1.0
+PYTHON: 3.7+
+REQUIRES: flask, flask-cors, pandas, numpy, werkzeug
+"""
+
 from flask import Flask, jsonify, request, send_from_directory, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
