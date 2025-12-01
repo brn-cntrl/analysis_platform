@@ -83,17 +83,17 @@ def generate_lineplot(group_data, metric_col, metric, analysis_method, output_fo
         ax.grid(True, alpha=0.3, linestyle='--')
         ax.legend(loc='upper left', fontsize=9)
     
-        plt.tight_layout()
-        
-        # Add subject label at bottom if provided
-        if subject_label:
-            fig.text(0.5, 0.01, f"Subject: {subject_label}", 
-                    ha='center', fontsize=10, style='italic', transform=fig.transFigure)
-        
-        filename = f'{metric}_lineplot{suffix}.png'
-        plot_path = os.path.join(output_folder, filename)
-        plt.savefig(plot_path, dpi=100, bbox_inches='tight')
-        plt.close()
+    plt.tight_layout()
+    
+    # Add subject label at bottom if provided
+    if subject_label:
+        fig.text(0.5, 0.01, f"Subject: {subject_label}", 
+                ha='center', fontsize=10, style='italic', transform=fig.transFigure)
+    
+    filename = f'{metric}_lineplot{suffix}.png'
+    plot_path = os.path.join(output_folder, filename)
+    plt.savefig(plot_path, dpi=100, bbox_inches='tight')
+    plt.close()
     
     print(f"    Saved: {filename}")
     

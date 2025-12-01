@@ -1,3 +1,311 @@
+/**
+LLM-Contract: AnalysisViewer
+version: 1.0
+component: AnalysisViewer
+file: frontend/src/components/AnalysisViewer.js
+purpose:
+  - End-to-end workflow for selecting experiment folders, scanning data, configuring analysis, and submitting to backend.
+  - Supports single- and multi-subject (batch) analysis, external data files, and optional data cleaning.
+audience:
+  - Students/end users operating the UCSD XRLab Data Analysis Platform.
+environment:
+  - Browser React app. Uses localStorage/sessionStorage and standard fetch APIs.
+
+authentication:
+  login:
+    input: { student_id: string }
+    storage: 
+      - localStorage.studentId
+      - localStorage.studentName
+    logout:
+      - clears localStorage and resets login state
+  unload:
+    - clears localStorage when logged in on beforeunload/unload
+
+primary UI flow:
+  1. Login/Register (if not authenticated)
+  2. Browse folder (webkitdirectory input)
+  3. Scan detected files (auto)
+  4. Configure analysis (wizard)
+  5. Review configuration (auto-validation)
+  6. Run analysis (uploads files + config, opens results tab)
+
+folder expectations:
+  structure:
+    - Top-level experiment folder containing per-subject subfolders
+    - Per-subject subfolders may include:
+      emotibit_data/: EmotiBit metric CSVs (e.g., _HR.csv, _EDA.csv, etc.)
+      respiration_data/: Optional respiration CSVs
+      external_data/: Optional external CSVs
+      *_event_markers.csv: Event markers CSVs
+      ser/transcription files: Optional notes/transcripts
+  HRV detection:
+    - If any PPG files are present (_PI.csv, _PR.csv, _PG.csv), HRV is added as an available metric automatically
+
+state-model:
+  auth:
+    isLoggedIn: boolean
+    loginStudentId: string
+    loginError: string
+    showRegister: boolean
+    registerName: string
+    registerEmail: string
+    registerStudentId: string
+  files:
+    selectedFolder: string | null
+    fileStructure:
+      emotibitFiles: Array<{ name, path, file }>
+      respirationFiles: Array<{ name, path, file }>
+      serFiles: Array<{ name, path, file }>
+      eventMarkersFiles: Array<{ name, path, file }>
+      externalFiles: Array<{ name, path, file }>
+      allFiles: File[]
+      hasPPGFiles: boolean
+    uploadStatus: string
+    isScanning: boolean
+  subjects:
+    availableSubjects: string[]
+    selectedSubjects: Record<string, boolean>
+    isBatchMode: boolean
+    subjectAvailability:
+      Record<
+        subject,
+        {
+          metrics: string[]
+          event_markers: string[]
+          conditions: string[]
+          has_ppg_files?: boolean
+        }
+      >
+    batchStatusMessage: string
+  configuration:
+    availableMetrics: string[]
+    availableEventMarkers: string[]
+    availableConditions: string[]
+    selectedMetrics: Record<string, boolean>
+    selectedEvents: Array<{ event: string; condition: string }>
+    analysisType: 'inter' | 'intra'
+    tagMode: 'union' | 'intersection'
+    eventMode: 'union' | 'intersection'
+    conditionMode: 'union' | 'intersection'
+    selectedAnalysisMethod: 'raw' | 'mean' | 'moving_average' | 'rmssd'
+    selectedPlotType: 'lineplot' | 'boxplot' | 'scatter' | 'poincare' | 'barchart'
+    cleaningEnabled: boolean
+    cleaningStages:
+      {
+        remove_invalid: boolean
+        remove_physiological_outliers: boolean
+        remove_statistical_outliers: boolean
+        remove_sudden_changes: boolean
+        interpolate: boolean
+        smooth: boolean
+      }
+    hasExternalFiles: boolean
+    externalFilesBySubject: Record<string, Array<ExternalFileMeta>>
+    subjectsWithExternal: string[]
+    externalConfigs:
+      Record<
+        subject,
+        Record<
+          filename,
+          {
+            selected?: boolean
+            timestampColumn: string
+            timestampFormat: 'seconds' | 'milliseconds' | 'iso8601' | string
+            dataColumns: Array<{ column: string; displayName: string; dataType: 'continuous' | 'categorical' | string; units: string }>
+            eventSources: string[]
+            conditionColumns: string[]
+          }
+        >
+      >
+    configIssues: string[]
+  parser:
+    needsDataParser: boolean
+    subjectsNeedingParser: string[]
+    parserLaunchStatus: string
+  wizard:
+    showConfigWizard: boolean
+    wizardStep: number
+    showWizard: boolean
+    currentStep: number
+  analysis:
+    isAnalyzing: boolean
+    results: any | null
+
+external file preview:
+  - Uses FileReader to read sample rows and infer column types (numeric vs string) for configuration UI.
+  - Produces metadata: { columns[], column_types[], sample_data[], row_count }
+
+batch logic and intersections:
+  - When multiple subjects selected:
+    - Intersection mode yields tags/events/conditions common to all selected subjects.
+    - Union mode yields aggregated sets across selected subjects.
+  - HRV is included in intersection if all selected subjects have PPG files (or global folder indicates PPG).
+
+wizard:
+  steps (labels):
+    0: Type
+    1: Tags
+    2: Events
+    3: Conditions
+    4: Method
+    5: Plot
+    6: Cleaning
+    7: External (only if external files exist)
+    8: Review
+    9: Run
+  validation:
+    - Runs at Review step; populates configIssues.
+
+validation rules:
+  - At least one subject selected.
+  - At least one metric selected.
+  - At least one event window with a selected event (event !== '').
+  - External file configs (per selected subject/file):
+    - timestampColumn is required.
+    - At least one valid dataColumns entry where column and displayName are set.
+  - Subject availability checks (if provided):
+    - Selected metrics (except HRV) must exist for the subject.
+    - Selected events (not 'all') must exist for the subject.
+    - Selected conditions (not 'all') must exist for the subject.
+
+plot-method compatibility:
+  incompatible:
+    mean: [lineplot, scatter, boxplot, poincare]
+    rmssd: [poincare]
+    moving_average: [poincare]
+  behavior:
+    - If selectedPlotType incompatible with selectedAnalysisMethod, auto-corrects to a valid plot and sets a warning status.
+
+cleaning:
+  pipeline (toggle per stage):
+    - remove_invalid (NaN, inf, negatives where applicable)
+    - remove_physiological_outliers (metric-specific ranges; e.g., HR 30-220 bpm)
+    - remove_statistical_outliers (modified z-score, threshold > 3.5)
+    - remove_sudden_changes (unrealistic rate-of-change artifacts)
+    - interpolate (linear for small gaps)
+    - smooth (median filter window=5)
+  payload:
+    - cleaning_enabled: boolean
+    - cleaning_stages: object as above
+
+APIs:
+  - POST /api/login
+    request: { student_id }
+    success: { name }
+    error: { error }
+    side-effects: sets localStorage.studentId, localStorage.studentName
+  - POST /api/register
+    request: { first_name, last_name, email }
+    success: { student_id }
+    error: { error }
+  - POST /api/launch-emotibit-parser
+    request: {}
+    success: {}
+    error: { error }
+  - POST /api/scan-folder-data
+    formData:
+      emotibit_filenames: JSON.stringify(string[])
+      detected_subjects: JSON.stringify(string[]) (optional; present if detected)
+      event_markers_files: File[] (batch)
+      event_markers_paths: string[] (batch)
+      external_metadata: JSON.stringify(Record<string, ExternalFileMeta[]>) (optional)
+    response:
+      {
+        metrics: string[]
+        event_markers: string[]
+        conditions: string[]
+        subjects: string[]
+        subject_availability?: Record<subject, { metrics[], event_markers[], conditions[], has_ppg_files?: boolean }>
+        batch_mode?: boolean
+        external_data?: {
+          has_files: boolean
+          files_by_subject: Record<string, ExternalFileMeta[]>
+          subjects_with_external: string[]
+        }
+      }
+  - POST /api/upload-folder-and-analyze
+    formData:
+      files: File[] (metrics, event markers, external)
+      paths: string[] (one per File)
+      folder_name: string
+      selected_metrics: JSON.stringify(string[])
+      selected_events: JSON.stringify(Array<{ event, condition }>)
+      analysis_method: string
+      plot_type: string
+      analyze_hrv: JSON.stringify(boolean)
+      analysis_type: 'inter' | 'intra'
+      student_id: string
+      cleaning_enabled: JSON.stringify(boolean)
+      cleaning_stages: JSON.stringify(object)
+      has_external_data?: 'true'
+      external_configs?: JSON.stringify(object)
+      selected_subjects?: JSON.stringify(string[])
+      batch_mode?: 'true'
+    response:
+      success: { results }
+      error: { error }
+    side-effects:
+      - sessionStorage.analysisResults = JSON.stringify(results)
+      - opens /results in new tab
+
+analysis selection and upload:
+  files included:
+    - Event markers files per selected subjects.
+    - Metric files per selected metrics:
+      HRV: includes _PI.csv, _PR.csv, _PG.csv
+      Others: includes corresponding _<METRIC>.csv files
+    - External files for selected subjects (if present) plus external_configs payload
+  duplicate avoidance:
+    - Uses a Set to avoid uploading the same path twice.
+
+results:
+  - Stores results in sessionStorage (analysisResults).
+  - Tries to open /results in a new tab; if blocked, displays message.
+
+user-facing messages:
+  - uploadStatus: success/warning/error text including counts and compatibility auto-corrections.
+  - batchStatusMessage: intersection/union summary across subjects.
+  - parserLaunchStatus: launch status or errors.
+  - configIssues: list rendered in Review step.
+
+types:
+  ExternalFileMeta:
+    {
+      filename: string
+      path: string
+      experiment_name: string
+      columns: string[]
+      column_types: string[] // 'numeric' | 'string'
+      sample_data: Array<Record<string, string | number | null>>
+      row_count: number
+    }
+
+security and privacy:
+  - student_id stored in localStorage; cleared on logout/unload.
+  - results placed in sessionStorage for the tab session only.
+
+error handling:
+  - Network failures produce visible UI errors.
+  - JSON parse errors on analyze response show explicit error.
+  - Validation blocks "Run Analysis" until resolved.
+
+assumptions:
+  - Backend understands provided form payload structures.
+  - Metric filenames follow suffix convention (_<METRIC>.csv).
+  - Event marker files may be per subject or shared; upload filters by subject path matching.
+
+extension points:
+  - Add more analysis methods or plot types with compatibility mapping.
+  - Extend externalConfigs schema for richer mapping and units.
+  - Add subject-level preprocessing checks to improve parser guidance.
+
+success criteria:
+  - User logs in, selects folder, sees accurate file counts/subjects/metrics.
+  - Wizard prevents incompatible configurations; auto-corrects plot-method combos.
+  - Analysis runs and results tab opens or is re-openable via button.
+*/
+
 import React, { useState, useEffect } from 'react';
 import './AnalysisViewer.css';
 import ExternalConfigStep from './ExternalConfigStep';
@@ -1657,6 +1965,20 @@ function AnalysisViewer() {
                   <p className="wizard-section-description">
                     Select how you want to visualize your data.
                   </p>
+                  {Object.keys(selectedMetrics).some(m => m === 'HRV' && selectedMetrics[m]) && (
+                    <div className="hrv-notice-box" style={{
+                      padding: '12px',
+                      backgroundColor: '#e3f2fd',
+                      border: '1px solid #2196F3',
+                      borderRadius: '4px',
+                      marginBottom: '15px',
+                      fontSize: '14px'
+                    }}>
+                      <strong>Note:</strong> HRV uses specialized analysis and generates 4 dedicated plots 
+                      (PPG Signal, Time Domain, Frequency Domain, Non-linear) regardless of the plot type selected here. 
+                      The plot type selection applies to other selected metrics.
+                    </div>
+                  )}
 
                   <div className="plot-grid">
                     <label className={`plot-option ${selectedAnalysisMethod === 'mean' ? 'disabled' : ''}`}>
@@ -1673,6 +1995,9 @@ function AnalysisViewer() {
                             <span>Time series visualization</span>
                             {selectedAnalysisMethod === 'mean' && (
                               <span className="incompatible-note">Requires time-series data</span>
+                            )}
+                            {selectedAnalysisMethod === 'moving_average' && (
+                              <span className="recommended-note">✓ Recommended for Moving Average</span>
                             )}
                           </div>
                         </label>

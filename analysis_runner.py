@@ -142,8 +142,17 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
     print()
     
     if analyze_hrv and df_markers is not None:
-        print("2. ANALYZING HRV")
-        print("-" * 80)
+        if batch_mode and analysis_type == 'intra' and len(selected_subjects) > 1:
+            print("2. SKIPPING HRV ANALYSIS")
+            print("-" * 80)
+            print("HRV analysis is disabled for intra-subject (multi-subject comparison) mode")
+            print("Reason: HRV processing takes 30-75 seconds per subject and would cause timeouts")
+            print("Recommendation: Use inter-subject mode to analyze each subject's HRV separately")
+            results['warnings'].append('HRV skipped: Not supported in intra-subject mode (use inter-subject instead)')
+            print()
+        else:
+            print("2. ANALYZING HRV")
+            print("-" * 80)
         
         try:
             hrv_results, hrv_plots = analyze_hrv_from_ppg(
