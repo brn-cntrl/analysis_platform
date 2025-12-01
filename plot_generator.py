@@ -313,6 +313,15 @@ def generate_comparison_plot(metric_results, metric, analysis_method, output_fol
     fig, ax = plt.subplots(figsize=(max(10, len(metric_results) * 2), 6))
     
     group_labels = list(metric_results.keys())
+    
+    # Truncate long labels for display
+    display_labels = []
+    for label in group_labels:
+        if len(label) > 15:
+            display_labels.append('...' + label[-15:])
+        else:
+            display_labels.append(label)
+    
     means = [metric_results[label]['mean'] for label in group_labels]
     stds = [metric_results[label]['std'] for label in group_labels]
     
@@ -322,7 +331,7 @@ def generate_comparison_plot(metric_results, metric, analysis_method, output_fol
                 alpha=0.7, edgecolor='black', linewidth=1.5)
     
     ax.set_xticks(x_pos)
-    ax.set_xticklabels(group_labels, rotation=45, ha='right')
+    ax.set_xticklabels(display_labels, rotation=0, ha='center')  # ✅ FIXED: Using display_labels
     ax.set_ylabel(f'{metric} Value', fontsize=12)
     ax.set_title(f'{metric}: Statistical Comparison', fontsize=14, fontweight='bold')
     ax.grid(True, alpha=0.3, axis='y', linestyle='--')

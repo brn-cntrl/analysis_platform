@@ -7,40 +7,107 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 
-def prepare_event_markers_timestamps(event_markers_df):
+def prepare_event_markers_timestamps(df):
     """
-    Prepare event markers dataframe to ensure it has unix_timestamp column.
-    Handles backward compatibility for files that use 'timestamp' with ISO format.
+    Prepare event markers by ensuring unix_timestamp column exists.
+    Handles both OLD and NEW event marker file structures.
+    
+    OLD structure (current):
+        - timestamp column (ISO format or unix)
+    
+    NEW structure (future):
+        - timestamp_unix column
+        - timestamp_iso column
     
     Args:
-        event_markers_df: DataFrame with event marker data
+        df: DataFrame with event markers
         
     Returns:
-        Modified dataframe with 'unix_timestamp' column
+        DataFrame with guaranteed 'unix_timestamp' column
     """
-    df = event_markers_df.copy()
+    df = df.copy()
     
-    if 'unix_timestamp' in df.columns:
-        print("  ✓ Found 'unix_timestamp' column")
+    # ═══════════════════════════════════════════════════════════
+    # NEW STRUCTURE: Check for timestamp_unix column
+    # ═══════════════════════════════════════════════════════════
+    if 'timestamp_unix' in df.columns:
+        print(f"  ✓ Found 'timestamp_unix' column (NEW format)")
+        df['unix_timestamp'] = df['timestamp_unix']
+        
+        # Drop invalid timestamps
+        before_count = len(df)
+        df = df[pd.notna(df['unix_timestamp'])]
+        df = df[df['unix_timestamp'] > 0]  # Unix timestamps must be positive
+        after_count = len(df)
+        
+        if before_count > after_count:
+            print(f"  ⚠ Dropped {before_count - after_count} rows with invalid timestamps")
+        
+        print(f"  ✓ Using {after_count} valid unix timestamps")
         return df
     
-    if 'timestamp' in df.columns:
-        print("  ✓ Found 'timestamp' column (ISO format) - converting to unix_timestamp")
-        
-        dt_series = pd.to_datetime(df['timestamp'], errors='coerce')
-        df['unix_timestamp'] = (dt_series - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s')
-        
-        before = len(df)
-        df = df.dropna(subset=['unix_timestamp'])
-        after = len(df)
-        
-        if before > after:
-            print(f"  ⚠ Dropped {before - after} rows with invalid timestamps")
-        
-        print(f"  ✓ Converted {after} timestamps from ISO to Unix format")
-        
-        return df
+    # ═══════════════════════════════════════════════════════════
+    # OLD STRUCTURE: Check for timestamp column
+    # ═══════════════════════════════════════════════════════════
+    if 'timestamp' not in df.columns:
+        raise ValueError("Event markers file missing timestamp column (expected 'timestamp' or 'timestamp_unix')")
     
+    # Check if timestamp is already unix format (numeric)
+    sample_timestamp = df['timestamp'].dropna().iloc[0] if len(df['timestamp'].dropna()) > 0 else None
+    
+    if sample_timestamp is None:
+        raise ValueError("No valid timestamps found in event markers file")
+    
+    # Try to detect format
+    if isinstance(sample_timestamp, (int, float)):
+        # Already unix timestamp
+        print(f"  ✓ Found 'timestamp' column (numeric unix format)")
+        df['unix_timestamp'] = df['timestamp']
+    else:
+        # ISO format string - need to convert
+        print(f"  ✓ Found 'timestamp' column (ISO format) - converting to unix_timestamp")
+        
+        converted_timestamps = []
+        invalid_count = 0
+        
+        for idx, ts in enumerate(df['timestamp']):
+            if pd.isna(ts):
+                converted_timestamps.append(None)
+                invalid_count += 1
+                continue
+            
+            try:
+                # Handle various ISO formats
+                ts_str = str(ts).strip()
+                
+                # Try parsing with fromisoformat (Python 3.7+)
+                try:
+                    dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+                except:
+                    # Fallback to pd.to_datetime for broader format support
+                    dt = pd.to_datetime(ts_str)
+                
+                unix_ts = dt.timestamp()
+                converted_timestamps.append(unix_ts)
+                
+            except Exception as e:
+                converted_timestamps.append(None)
+                invalid_count += 1
+        
+        df['unix_timestamp'] = converted_timestamps
+        
+        # Drop rows with invalid timestamps
+        before_count = len(df)
+        df = df[pd.notna(df['unix_timestamp'])]
+        after_count = len(df)
+        
+        if invalid_count > 0:
+            print(f"  ⚠ Dropped {invalid_count} rows with invalid timestamps")
+        
+        print(f"  ✓ Converted {after_count} timestamps from ISO to Unix format")
+    
+    return df
+
     raise ValueError("Event markers file must have either 'unix_timestamp' or 'timestamp' column")
 
 
