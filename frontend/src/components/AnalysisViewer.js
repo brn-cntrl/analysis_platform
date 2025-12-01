@@ -1,311 +1,3 @@
-/**
-LLM-Contract: AnalysisViewer
-version: 1.0
-component: AnalysisViewer
-file: frontend/src/components/AnalysisViewer.js
-purpose:
-  - End-to-end workflow for selecting experiment folders, scanning data, configuring analysis, and submitting to backend.
-  - Supports single- and multi-subject (batch) analysis, external data files, and optional data cleaning.
-audience:
-  - Students/end users operating the UCSD XRLab Data Analysis Platform.
-environment:
-  - Browser React app. Uses localStorage/sessionStorage and standard fetch APIs.
-
-authentication:
-  login:
-    input: { student_id: string }
-    storage: 
-      - localStorage.studentId
-      - localStorage.studentName
-    logout:
-      - clears localStorage and resets login state
-  unload:
-    - clears localStorage when logged in on beforeunload/unload
-
-primary UI flow:
-  1. Login/Register (if not authenticated)
-  2. Browse folder (webkitdirectory input)
-  3. Scan detected files (auto)
-  4. Configure analysis (wizard)
-  5. Review configuration (auto-validation)
-  6. Run analysis (uploads files + config, opens results tab)
-
-folder expectations:
-  structure:
-    - Top-level experiment folder containing per-subject subfolders
-    - Per-subject subfolders may include:
-      emotibit_data/: EmotiBit metric CSVs (e.g., _HR.csv, _EDA.csv, etc.)
-      respiration_data/: Optional respiration CSVs
-      external_data/: Optional external CSVs
-      *_event_markers.csv: Event markers CSVs
-      ser/transcription files: Optional notes/transcripts
-  HRV detection:
-    - If any PPG files are present (_PI.csv, _PR.csv, _PG.csv), HRV is added as an available metric automatically
-
-state-model:
-  auth:
-    isLoggedIn: boolean
-    loginStudentId: string
-    loginError: string
-    showRegister: boolean
-    registerName: string
-    registerEmail: string
-    registerStudentId: string
-  files:
-    selectedFolder: string | null
-    fileStructure:
-      emotibitFiles: Array<{ name, path, file }>
-      respirationFiles: Array<{ name, path, file }>
-      serFiles: Array<{ name, path, file }>
-      eventMarkersFiles: Array<{ name, path, file }>
-      externalFiles: Array<{ name, path, file }>
-      allFiles: File[]
-      hasPPGFiles: boolean
-    uploadStatus: string
-    isScanning: boolean
-  subjects:
-    availableSubjects: string[]
-    selectedSubjects: Record<string, boolean>
-    isBatchMode: boolean
-    subjectAvailability:
-      Record<
-        subject,
-        {
-          metrics: string[]
-          event_markers: string[]
-          conditions: string[]
-          has_ppg_files?: boolean
-        }
-      >
-    batchStatusMessage: string
-  configuration:
-    availableMetrics: string[]
-    availableEventMarkers: string[]
-    availableConditions: string[]
-    selectedMetrics: Record<string, boolean>
-    selectedEvents: Array<{ event: string; condition: string }>
-    analysisType: 'inter' | 'intra'
-    tagMode: 'union' | 'intersection'
-    eventMode: 'union' | 'intersection'
-    conditionMode: 'union' | 'intersection'
-    selectedAnalysisMethod: 'raw' | 'mean' | 'moving_average' | 'rmssd'
-    selectedPlotType: 'lineplot' | 'boxplot' | 'scatter' | 'poincare' | 'barchart'
-    cleaningEnabled: boolean
-    cleaningStages:
-      {
-        remove_invalid: boolean
-        remove_physiological_outliers: boolean
-        remove_statistical_outliers: boolean
-        remove_sudden_changes: boolean
-        interpolate: boolean
-        smooth: boolean
-      }
-    hasExternalFiles: boolean
-    externalFilesBySubject: Record<string, Array<ExternalFileMeta>>
-    subjectsWithExternal: string[]
-    externalConfigs:
-      Record<
-        subject,
-        Record<
-          filename,
-          {
-            selected?: boolean
-            timestampColumn: string
-            timestampFormat: 'seconds' | 'milliseconds' | 'iso8601' | string
-            dataColumns: Array<{ column: string; displayName: string; dataType: 'continuous' | 'categorical' | string; units: string }>
-            eventSources: string[]
-            conditionColumns: string[]
-          }
-        >
-      >
-    configIssues: string[]
-  parser:
-    needsDataParser: boolean
-    subjectsNeedingParser: string[]
-    parserLaunchStatus: string
-  wizard:
-    showConfigWizard: boolean
-    wizardStep: number
-    showWizard: boolean
-    currentStep: number
-  analysis:
-    isAnalyzing: boolean
-    results: any | null
-
-external file preview:
-  - Uses FileReader to read sample rows and infer column types (numeric vs string) for configuration UI.
-  - Produces metadata: { columns[], column_types[], sample_data[], row_count }
-
-batch logic and intersections:
-  - When multiple subjects selected:
-    - Intersection mode yields tags/events/conditions common to all selected subjects.
-    - Union mode yields aggregated sets across selected subjects.
-  - HRV is included in intersection if all selected subjects have PPG files (or global folder indicates PPG).
-
-wizard:
-  steps (labels):
-    0: Type
-    1: Tags
-    2: Events
-    3: Conditions
-    4: Method
-    5: Plot
-    6: Cleaning
-    7: External (only if external files exist)
-    8: Review
-    9: Run
-  validation:
-    - Runs at Review step; populates configIssues.
-
-validation rules:
-  - At least one subject selected.
-  - At least one metric selected.
-  - At least one event window with a selected event (event !== '').
-  - External file configs (per selected subject/file):
-    - timestampColumn is required.
-    - At least one valid dataColumns entry where column and displayName are set.
-  - Subject availability checks (if provided):
-    - Selected metrics (except HRV) must exist for the subject.
-    - Selected events (not 'all') must exist for the subject.
-    - Selected conditions (not 'all') must exist for the subject.
-
-plot-method compatibility:
-  incompatible:
-    mean: [lineplot, scatter, boxplot, poincare]
-    rmssd: [poincare]
-    moving_average: [poincare]
-  behavior:
-    - If selectedPlotType incompatible with selectedAnalysisMethod, auto-corrects to a valid plot and sets a warning status.
-
-cleaning:
-  pipeline (toggle per stage):
-    - remove_invalid (NaN, inf, negatives where applicable)
-    - remove_physiological_outliers (metric-specific ranges; e.g., HR 30-220 bpm)
-    - remove_statistical_outliers (modified z-score, threshold > 3.5)
-    - remove_sudden_changes (unrealistic rate-of-change artifacts)
-    - interpolate (linear for small gaps)
-    - smooth (median filter window=5)
-  payload:
-    - cleaning_enabled: boolean
-    - cleaning_stages: object as above
-
-APIs:
-  - POST /api/login
-    request: { student_id }
-    success: { name }
-    error: { error }
-    side-effects: sets localStorage.studentId, localStorage.studentName
-  - POST /api/register
-    request: { first_name, last_name, email }
-    success: { student_id }
-    error: { error }
-  - POST /api/launch-emotibit-parser
-    request: {}
-    success: {}
-    error: { error }
-  - POST /api/scan-folder-data
-    formData:
-      emotibit_filenames: JSON.stringify(string[])
-      detected_subjects: JSON.stringify(string[]) (optional; present if detected)
-      event_markers_files: File[] (batch)
-      event_markers_paths: string[] (batch)
-      external_metadata: JSON.stringify(Record<string, ExternalFileMeta[]>) (optional)
-    response:
-      {
-        metrics: string[]
-        event_markers: string[]
-        conditions: string[]
-        subjects: string[]
-        subject_availability?: Record<subject, { metrics[], event_markers[], conditions[], has_ppg_files?: boolean }>
-        batch_mode?: boolean
-        external_data?: {
-          has_files: boolean
-          files_by_subject: Record<string, ExternalFileMeta[]>
-          subjects_with_external: string[]
-        }
-      }
-  - POST /api/upload-folder-and-analyze
-    formData:
-      files: File[] (metrics, event markers, external)
-      paths: string[] (one per File)
-      folder_name: string
-      selected_metrics: JSON.stringify(string[])
-      selected_events: JSON.stringify(Array<{ event, condition }>)
-      analysis_method: string
-      plot_type: string
-      analyze_hrv: JSON.stringify(boolean)
-      analysis_type: 'inter' | 'intra'
-      student_id: string
-      cleaning_enabled: JSON.stringify(boolean)
-      cleaning_stages: JSON.stringify(object)
-      has_external_data?: 'true'
-      external_configs?: JSON.stringify(object)
-      selected_subjects?: JSON.stringify(string[])
-      batch_mode?: 'true'
-    response:
-      success: { results }
-      error: { error }
-    side-effects:
-      - sessionStorage.analysisResults = JSON.stringify(results)
-      - opens /results in new tab
-
-analysis selection and upload:
-  files included:
-    - Event markers files per selected subjects.
-    - Metric files per selected metrics:
-      HRV: includes _PI.csv, _PR.csv, _PG.csv
-      Others: includes corresponding _<METRIC>.csv files
-    - External files for selected subjects (if present) plus external_configs payload
-  duplicate avoidance:
-    - Uses a Set to avoid uploading the same path twice.
-
-results:
-  - Stores results in sessionStorage (analysisResults).
-  - Tries to open /results in a new tab; if blocked, displays message.
-
-user-facing messages:
-  - uploadStatus: success/warning/error text including counts and compatibility auto-corrections.
-  - batchStatusMessage: intersection/union summary across subjects.
-  - parserLaunchStatus: launch status or errors.
-  - configIssues: list rendered in Review step.
-
-types:
-  ExternalFileMeta:
-    {
-      filename: string
-      path: string
-      experiment_name: string
-      columns: string[]
-      column_types: string[] // 'numeric' | 'string'
-      sample_data: Array<Record<string, string | number | null>>
-      row_count: number
-    }
-
-security and privacy:
-  - student_id stored in localStorage; cleared on logout/unload.
-  - results placed in sessionStorage for the tab session only.
-
-error handling:
-  - Network failures produce visible UI errors.
-  - JSON parse errors on analyze response show explicit error.
-  - Validation blocks "Run Analysis" until resolved.
-
-assumptions:
-  - Backend understands provided form payload structures.
-  - Metric filenames follow suffix convention (_<METRIC>.csv).
-  - Event marker files may be per subject or shared; upload filters by subject path matching.
-
-extension points:
-  - Add more analysis methods or plot types with compatibility mapping.
-  - Extend externalConfigs schema for richer mapping and units.
-  - Add subject-level preprocessing checks to improve parser guidance.
-
-success criteria:
-  - User logs in, selects folder, sees accurate file counts/subjects/metrics.
-  - Wizard prevents incompatible configurations; auto-corrects plot-method combos.
-  - Analysis runs and results tab opens or is re-openable via button.
-*/
-
 import React, { useState, useEffect } from 'react';
 import './AnalysisViewer.css';
 import ExternalConfigStep from './ExternalConfigStep';
@@ -358,7 +50,6 @@ function AnalysisViewer() {
   const [selectedAnalysisMethod, setSelectedAnalysisMethod] = useState('raw');
   const [selectedPlotType, setSelectedPlotType] = useState('lineplot');
   const [configIssues, setConfigIssues] = useState([]);
-  // const [lastAnalysisStatus, setLastAnalysisStatus] = useState(null);
 
   // Data cleaning state
   const [cleaningEnabled, setCleaningEnabled] = useState(false);
@@ -394,13 +85,13 @@ function AnalysisViewer() {
         if (subjectsWithExternal.includes(subject)) {
           const subjectConfigs = externalConfigs[subject] || {};
           Object.entries(subjectConfigs).forEach(([filename, config]) => {
-            if (!config.selected) return;
+            if (config.selected === false) return;
             
             if (!config.timestampColumn) {
               issues.push(`External (${subject}/${filename}): No timestamp column selected`);
             }
             
-            const validDataColumns = config.dataColumns.filter(dc => dc.column && dc.displayName);
+            const validDataColumns = config.dataColumns?.filter(dc => dc.column && dc.displayName) || [];
             if (validDataColumns.length === 0) {
               issues.push(`External (${subject}/${filename}): No data columns configured`);
             }
@@ -436,13 +127,11 @@ function AnalysisViewer() {
     setConfigIssues(issues);
   }, [selectedSubjects, selectedMetrics, selectedEvents, hasExternalFiles, subjectsWithExternal, externalConfigs, subjectAvailability]);
 
-  // Debug: Monitor when availableMetrics changes
   useEffect(() => {
     console.log('availableMetrics changed:', availableMetrics);
     console.log('HRV included:', availableMetrics.includes('HRV'));
   }, [availableMetrics]);
 
-  // Validate configuration when reaching review step
   useEffect(() => {
     if (wizardStep === (hasExternalFiles ? 8 : 7) && showConfigWizard) {
       console.log('Reached review step, validating configuration...');
@@ -460,7 +149,6 @@ function AnalysisViewer() {
     const handleBeforeUnload = (e) => {
       if (isLoggedIn) {
         localStorage.clear();
-        
         e.preventDefault();
         e.returnValue = ''; 
         return ''; 
@@ -468,13 +156,11 @@ function AnalysisViewer() {
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
-
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [isLoggedIn]);
 
-  // Prevent accidental navigation within the app
   useEffect(() => {
     if (!isLoggedIn) return;
 
@@ -482,9 +168,7 @@ function AnalysisViewer() {
       localStorage.clear();
     };
 
-    // Handle browser/tab close
     window.addEventListener('unload', handleUnload);
-
     return () => {
       window.removeEventListener('unload', handleUnload);
     };
@@ -569,6 +253,7 @@ function AnalysisViewer() {
       setParserLaunchStatus(`Error: ${error.message}`);
     }
   };
+
   const handleFolderSelect = async (e) => {
     const files = Array.from(e.target.files);
     
@@ -583,6 +268,7 @@ function AnalysisViewer() {
     const structure = {
       emotibitFiles: [],
       respirationFiles: [],
+      cardiacFiles: [],
       serFiles: [],
       eventMarkersFiles: [],
       externalFiles: [],
@@ -600,8 +286,14 @@ function AnalysisViewer() {
           path: path,
           file: file
         });
-      } else if (path.includes('respiration_data/') && fileName.endsWith('.csv')) {
+      } else if ((path.includes('respiratory_data/') || path.includes('respiration_data/') || path.includes('vernier_data/')) && fileName.endsWith('.csv')) {
         structure.respirationFiles.push({
+          name: file.name,
+          path: path,
+          file: file
+        });
+      } else if ((path.includes('cardiac_data/') || path.includes('polar_data/')) && fileName.endsWith('.csv')) {
+        structure.cardiacFiles.push({
           name: file.name,
           path: path,
           file: file
@@ -619,7 +311,6 @@ function AnalysisViewer() {
           file: file
         });
       } else if (path.includes('external_data/') && fileName.endsWith('.csv')) {
-     
         structure.externalFiles.push({
           name: file.name,
           path: path,
@@ -633,23 +324,26 @@ function AnalysisViewer() {
     );
 
     console.log('=== Folder Structure Analysis ===');
-        console.log('=== Folder Structure Analysis ===');
-        console.log('Total EmotiBit files:', structure.emotibitFiles.length);
-        console.log('EmotiBit filenames:', structure.emotibitFiles.map(f => f.name));
-        console.log('PPG files detected:', structure.hasPPGFiles);
-        console.log('=================================');
+    console.log('Total EmotiBit files:', structure.emotibitFiles.length);
+    console.log('EmotiBit filenames:', structure.emotibitFiles.map(f => f.name));
+    console.log('Total Respiratory files:', structure.respirationFiles.length);
+    console.log('Respiratory filenames:', structure.respirationFiles.map(f => f.name));
+    console.log('Total Cardiac files:', structure.cardiacFiles.length);
+    console.log('Cardiac filenames:', structure.cardiacFiles.map(f => f.name));
+    console.log('PPG files detected:', structure.hasPPGFiles);
+    console.log('=================================');
 
-        setFileStructure(structure);
-        setUploadStatus(`Folder "${folderName}" selected with ${files.length} files`);
+    setFileStructure(structure);
+    setUploadStatus(`Folder "${folderName}" selected with ${files.length} files`);
 
-        await scanFolderData(structure);
-      };
+    await scanFolderData(structure);
+  };
 
-      const scanFolderData = async (structure) => {
-        if (!structure.emotibitFiles || structure.emotibitFiles.length === 0) {
-          setUploadStatus('No EmotiBit files found');
-          return;
-        }
+  const scanFolderData = async (structure) => {
+    if (!structure.emotibitFiles || structure.emotibitFiles.length === 0) {
+      setUploadStatus('No EmotiBit files found');
+      return;
+    }
 
     setIsScanning(true);
     setUploadStatus('Scanning folder data...');
@@ -662,12 +356,10 @@ function AnalysisViewer() {
             const text = e.target.result;
             const lines = text.split('\n');
             
-            // Parse headers - filter out empty ones from trailing commas
             const headers = lines[0].split(',')
               .map(h => h.trim())
               .filter(h => h && !h.startsWith('Unnamed:'));
             
-            // Parse sample rows
             const sampleData = [];
             for (let i = 1; i < Math.min(6, lines.length); i++) {
               if (lines[i].trim()) {
@@ -680,7 +372,6 @@ function AnalysisViewer() {
               }
             }
             
-            // Simple type detection - just check if values are numeric
             const columnTypes = headers.map(header => {
               const sampleValues = sampleData
                 .map(row => row[header])
@@ -688,7 +379,6 @@ function AnalysisViewer() {
               
               if (sampleValues.length === 0) return 'string';
               
-              // Count how many values are numeric
               let numericCount = 0;
               for (const value of sampleValues) {
                 if (!isNaN(parseFloat(value)) && isFinite(value)) {
@@ -696,7 +386,6 @@ function AnalysisViewer() {
                 }
               }
               
-              // If most values are numeric, it's numeric
               return (numericCount / sampleValues.length >= 0.5) ? 'numeric' : 'string';
             });
             
@@ -715,27 +404,25 @@ function AnalysisViewer() {
       });
     };
 
-        const formData = new FormData();
-        
-        const emotibitFileList = structure.emotibitFiles.map(f => f.path);
-        formData.append('emotibit_filenames', JSON.stringify(emotibitFileList));
-
-        const allPaths = structure.allFiles.map(f => f.webkitRelativePath);
-        const subjectFolders = new Set();
-        allPaths.forEach(path => {
-          const parts = path.split('/');
-          if (parts.length >= 3) {
-            subjectFolders.add(parts[1]);
-          }
-        });
+    const formData = new FormData();
     
+    const emotibitFileList = structure.emotibitFiles.map(f => f.path);
+    formData.append('emotibit_filenames', JSON.stringify(emotibitFileList));
+
+    const allPaths = structure.allFiles.map(f => f.webkitRelativePath);
+    const subjectFolders = new Set();
+    allPaths.forEach(path => {
+      const parts = path.split('/');
+      if (parts.length >= 3) {
+        subjectFolders.add(parts[1]);
+      }
+    });
+
     const detectedSubjects = Array.from(subjectFolders).sort();
 
-    // ALWAYS send detected subjects, even if there's only 1
     if (detectedSubjects.length > 0) {
       formData.append('detected_subjects', JSON.stringify(detectedSubjects));
       
-      // ALWAYS send event markers in batch format when we have subjects
       structure.eventMarkersFiles.forEach((emFile, index) => {
         formData.append('event_markers_files', emFile.file);
         formData.append('event_markers_paths', emFile.path);
@@ -841,12 +528,12 @@ function AnalysisViewer() {
           setsubjectsWithExternal(data.external_data.subjects_with_external);
           setHasExternalFiles(true);
           
-          // Initialize configs for each file
           const initialConfigs = {};
           Object.entries(data.external_data.files_by_subject).forEach(([subject, files]) => {
             initialConfigs[subject] = {};
             files.forEach(fileData => {
               initialConfigs[subject][fileData.filename] = {
+                selected: true,
                 timestampColumn: '',
                 timestampFormat: 'seconds',
                 dataColumns: [{
@@ -885,7 +572,7 @@ function AnalysisViewer() {
           setBatchStatusMessage(intersectionMsg);
         }
         setUploadStatus(`Found ${metrics.length} metrics${eventMarkersMsg}${conditionsMsg}${subjectsMsg}${externalMsg}`);
-        // Check if any subjects need DataParser
+
         if (data.subjects && data.subjects.length > 0) {
           const subjectsNeedingParserList = [];
           
@@ -1122,6 +809,7 @@ function AnalysisViewer() {
     const pathsToUpload = [];
     const addedFilePaths = new Set();
 
+    // 1. Event markers
     if (fileStructure.eventMarkersFiles && fileStructure.eventMarkersFiles.length > 0) {
       fileStructure.eventMarkersFiles.forEach(emFile => {
         const belongsToSelected = selectedSubjectsList.some(subject => emFile.path.includes(subject));
@@ -1133,6 +821,7 @@ function AnalysisViewer() {
       });
     }
     
+    // 2. EmotiBit files
     selectedMetricsList.forEach(metric => {
       if (metric === 'HRV') {
         ['PI', 'PR', 'PG'].forEach(ppgType => {
@@ -1159,30 +848,67 @@ function AnalysisViewer() {
       }
     });
 
+    // 3. Respiratory files
+    if (fileStructure.respirationFiles && fileStructure.respirationFiles.length > 0) {
+      fileStructure.respirationFiles.forEach(respFile => {
+        const belongsToSelected = selectedSubjectsList.some(subject => respFile.path.includes(subject));
+        if (belongsToSelected && !addedFilePaths.has(respFile.path)) {
+          filesToUpload.push(respFile.file);
+          pathsToUpload.push(respFile.path);
+          addedFilePaths.add(respFile.path);
+        }
+      });
+    }
+
+    // 4. Cardiac files
+    if (fileStructure.cardiacFiles && fileStructure.cardiacFiles.length > 0) {
+      fileStructure.cardiacFiles.forEach(cardiacFile => {
+        const belongsToSelected = selectedSubjectsList.some(subject => cardiacFile.path.includes(subject));
+        if (belongsToSelected && !addedFilePaths.has(cardiacFile.path)) {
+          filesToUpload.push(cardiacFile.file);
+          pathsToUpload.push(cardiacFile.path);
+          addedFilePaths.add(cardiacFile.path);
+        }
+      });
+    }
+
+    // 5. External files (with selection filtering)
+    let totalExternalFiles = 0;
+    let selectedExternalFiles = 0;
+    
     if (hasExternalFiles) {
       selectedSubjectsList.forEach(subject => {
         if (subjectsWithExternal.includes(subject) && externalFilesBySubject[subject]) {
           externalFilesBySubject[subject].forEach(fileData => {
-            const externalFile = fileStructure.externalFiles.find(f => f.path === fileData.path);
-            if (externalFile && !addedFilePaths.has(externalFile.path)) {
-              filesToUpload.push(externalFile.file);
-              pathsToUpload.push(externalFile.path);
-              addedFilePaths.add(externalFile.path);
+            totalExternalFiles++;
+            
+            const fileConfig = externalConfigs[subject]?.[fileData.filename];
+            const isSelected = fileConfig?.selected !== false;
+            
+            if (isSelected) {
+              selectedExternalFiles++;
+              const externalFile = fileStructure.externalFiles.find(f => f.path === fileData.path);
+              if (externalFile && !addedFilePaths.has(externalFile.path)) {
+                filesToUpload.push(externalFile.file);
+                pathsToUpload.push(externalFile.path);
+                addedFilePaths.add(externalFile.path);
+              }
             }
           });
         }
       });
       
-      formData.append('external_configs', JSON.stringify(externalConfigs));
-      formData.append('has_external_data', 'true');
+      console.log(`External data: ${selectedExternalFiles}/${totalExternalFiles} files selected`);
     }
 
+    // 6. Append all files to FormData
     console.log(`Uploading ${filesToUpload.length} files for analysis:`, pathsToUpload.map(p => p.split('/').pop()));
     filesToUpload.forEach((file, index) => {
       formData.append('files', file);
       formData.append('paths', pathsToUpload[index]);
     });
 
+    // 7. Add configuration parameters
     formData.append('folder_name', selectedFolder);
     formData.append('selected_metrics', JSON.stringify(selectedMetricsList));
     formData.append('selected_events', JSON.stringify(selectedEvents));
@@ -1191,28 +917,16 @@ function AnalysisViewer() {
     formData.append('analyze_hrv', JSON.stringify(selectedMetricsList.includes('HRV')));
     formData.append('analysis_type', analysisType);  
     formData.append('student_id', localStorage.getItem('studentId'));
-
     formData.append('cleaning_enabled', JSON.stringify(cleaningEnabled));
     formData.append('cleaning_stages', JSON.stringify(cleaningStages));
 
+    // 8. Add external data config
     if (hasExternalFiles) {
-      selectedSubjectsList.forEach(subject => {
-        if (subjectsWithExternal.includes(subject) && externalFilesBySubject[subject]) {
-          externalFilesBySubject[subject].forEach(fileData => {
-            const externalFile = fileStructure.externalFiles.find(f => f.path === fileData.path);
-            if (externalFile && !addedFilePaths.has(externalFile.path)) {
-              filesToUpload.push(externalFile.file);
-              pathsToUpload.push(externalFile.path);
-              addedFilePaths.add(externalFile.path);
-            }
-          });
-        }
-      });
-      
       formData.append('external_configs', JSON.stringify(externalConfigs));
       formData.append('has_external_data', 'true');
     }
 
+    // 9. Add batch mode parameters
     if (selectedSubjectsList.length > 1) {
       formData.append('selected_subjects', JSON.stringify(selectedSubjectsList));
       formData.append('batch_mode', 'true');
@@ -1227,7 +941,9 @@ function AnalysisViewer() {
     console.log('Analysis method:', selectedAnalysisMethod);
     console.log('Plot type:', selectedPlotType);
     console.log('Has external data:', hasExternalFiles);
-    console.log('External data subjects:', subjectsWithExternal.filter(s => selectedSubjects[s]));
+    if (hasExternalFiles) {
+      console.log('External files selected:', `${selectedExternalFiles}/${totalExternalFiles}`);
+    }
     console.log('==========================');
     
     try {
@@ -1251,7 +967,6 @@ function AnalysisViewer() {
         console.error('JSON parse error:', parseError);
         console.error('Response text:', responseText);
         setUploadStatus(`Error: Invalid JSON response from server. Check console for details.`);
-  
         return;
       }
       
@@ -1272,7 +987,6 @@ function AnalysisViewer() {
     } catch (error) {
       console.error('Fetch error:', error);
       setUploadStatus(`Error: ${error.message}`);
-
     } finally {
       setIsAnalyzing(false);
     }
@@ -1523,6 +1237,15 @@ function AnalysisViewer() {
               <span className="file-count">{fileStructure.respirationFiles.length} file(s)</span>
             </div>
             
+            <div className="file-category">
+              <strong>Cardiac Data:</strong>
+              {fileStructure.cardiacFiles.length > 0 ? (
+                <span className="file-count">{fileStructure.cardiacFiles.length} file(s)</span>
+              ) : (
+                <span style={{ color: '#666', fontSize: '14px' }}>⚠️ No files (optional)</span>
+              )}
+            </div>
+
             <div className="file-category">
               <strong>Event Markers:</strong>
               {fileStructure.eventMarkersFiles.length > 0 ? (
@@ -2247,7 +1970,23 @@ function AnalysisViewer() {
                     </div>
                     {hasExternalFiles && (
                       <div className="summary-item">
-                        <strong>External Data Files:</strong> {subjectsWithExternal.filter(s => selectedSubjects[s]).length} subject(s) with data
+                        <strong>External Data Files:</strong> {(() => {
+                          let selectedCount = 0;
+                          let totalCount = 0;
+                          
+                          Object.keys(selectedSubjects).filter(s => selectedSubjects[s]).forEach(subject => {
+                            if (externalConfigs[subject]) {
+                              Object.entries(externalConfigs[subject]).forEach(([filename, config]) => {
+                                totalCount++;
+                                if (config.selected !== false) {
+                                  selectedCount++;
+                                }
+                              });
+                            }
+                          });
+                          
+                          return `${selectedCount}/${totalCount} file(s) selected`;
+                        })()}
                       </div>
                     )}
                   </div>
@@ -2312,7 +2051,7 @@ function AnalysisViewer() {
                 disabled={wizardStep === (hasExternalFiles ? 9 : 8)}
                 className="wizard-nav-btn next"
               >
-                Next 
+                Next →
               </button>
             </div>
           </div>
@@ -2385,7 +2124,7 @@ function AnalysisViewer() {
               onClick={handleNextStep}
               disabled={currentStep === wizardSteps.length - 1}
             >
-              Next 
+              Next →
             </button>
           </div>
         </div>
