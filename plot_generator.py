@@ -858,7 +858,7 @@ def generate_lineplot(group_data, metric_col, metric, analysis_method, output_fo
     plt.savefig(plot_path, dpi=100, bbox_inches='tight')
     plt.close()
     
-    print(f"    Saved: {filename}")
+    print(f"Saved: {filename}")
     
     return {
         'name': f'{metric} Line Plot',
@@ -892,7 +892,7 @@ def generate_boxplot(group_data, metric_col, metric, analysis_method, output_fol
                         medianprops=dict(color='black', linewidth=2))
     except ValueError as e:
         # Fallback to non-notched boxplot if insufficient data
-        print(f"    Notched boxplot failed, using standard boxplot: {e}")
+        print(f"Notched boxplot failed, using standard boxplot: {e}")
         bp = ax.boxplot(data_arrays, labels=group_labels, patch_artist=True,
                         notch=False, showmeans=True,
                         meanprops=dict(marker='D', markerfacecolor='red', markersize=8),
@@ -924,7 +924,7 @@ def generate_boxplot(group_data, metric_col, metric, analysis_method, output_fol
     plt.savefig(plot_path, dpi=100, bbox_inches='tight')
     plt.close()
     
-    print(f"    Saved: {filename}")
+    print(f"Saved: {filename}")
     
     return {
         'name': f'{metric} Box Plot',
@@ -940,7 +940,7 @@ def generate_scatter(group_data, metric_col, metric, analysis_method, output_fol
     """
     # Scatter plots require multiple data points - incompatible with mean analysis
     if analysis_method == 'mean':
-        print(f"    Scatter plot requires multiple data points (mean analysis produces single value)")
+        print(f"Scatter plot requires multiple data points (mean analysis produces single value)")
         return None
     
     colors = ['#4CAF50', '#2196F3', '#FF9800', '#9C27B0', '#F44336', 
@@ -989,7 +989,7 @@ def generate_scatter(group_data, metric_col, metric, analysis_method, output_fol
     plt.savefig(plot_path, dpi=100, bbox_inches='tight')
     plt.close()
     
-    print(f"    Saved: {filename}")
+    print(f"Saved: {filename}")
     
     return {
         'name': f'{metric} Scatter Plot',
@@ -1056,7 +1056,7 @@ def generate_poincare(group_data, metric_col, metric, analysis_method, output_fo
     plt.savefig(plot_path, dpi=100, bbox_inches='tight')
     plt.close()
     
-    print(f"    Saved: {filename}")
+    print(f"Saved: {filename}")
     
     return {
         'name': f'{metric} Poincaré Plot',
@@ -1116,7 +1116,7 @@ def generate_comparison_plot(metric_results, metric, analysis_method, output_fol
     plt.savefig(plot_path, dpi=100, bbox_inches='tight')
     plt.close()
     
-    print(f"    Saved: {filename}")
+    print(f"Saved: {filename}")
     
     return {
         'name': f'{metric} Statistical Comparison',

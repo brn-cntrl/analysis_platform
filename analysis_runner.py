@@ -611,7 +611,7 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
         if batch_mode:
             print(f"Batch mode: Event markers will be loaded per-subject")
             em_count = len(manifest.get('event_markers_by_subject', {}))
-            print(f"  {em_count} subject(s) have event markers")
+            print(f"{em_count} subject(s) have event markers")
             
             df_markers = True  # Truthy value to pass checks
             
@@ -677,20 +677,59 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
             traceback.print_exc()
             print()
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # ANALYZE EXTERNAL DATA FILES
+    # ═══════════════════════════════════════════════════════════════════════════
+    if external_configs and len(external_configs) > 0:
+        print(f"3a. ANALYZING EXTERNAL DATA")
+        print("-" * 80)
+        
+        try:
+            external_results, external_plots = analyze_external_data(
+                manifest,
+                external_configs,
+                comparison_groups,
+                output_folder,
+                batch_mode=batch_mode,
+                selected_subjects=selected_subjects,
+                analysis_method=analysis_method,
+                plot_type=plot_type,
+                cleaning_enabled=cleaning_enabled,
+                cleaning_stages=cleaning_stages
+            )
+            
+            if external_results:
+                # Merge external results into main analysis results
+                for data_label, stats in external_results.items():
+                    # Use a special key format to distinguish external data
+                    results['analysis'][f"External: {data_label}"] = stats
+                
+                results['plots'].extend(external_plots)
+                print(f"  ✓ Analyzed {len(external_results)} external data series")
+            
+            print()
+        except Exception as e:
+            error_msg = f"Error analyzing external data: {str(e)}"
+            print(f"ERROR: {error_msg}")
+            results['errors'].append(error_msg)
+            import traceback
+            traceback.print_exc()
+            print()
+
     # Analyze selected metrics
     if df_markers is not None and selected_metrics:
-        print(f"3. ANALYZING SELECTED METRICS (Method: {get_method_label(analysis_method)})")
+        print(f"4. ANALYZING SELECTED METRICS (Method: {get_method_label(analysis_method)})")
         print("-" * 80)
         
         # Synchronize HRV flag with selected metrics
         if 'HRV' in selected_metrics and not analyze_hrv:
-            print("  ℹ️  HRV detected in metrics list - enabling HRV analysis")
+            print("HRV detected in metrics list - enabling HRV analysis")
             analyze_hrv = True
         
         for metric in selected_metrics:
             if metric == 'HRV':
                 # HRV is handled separately above
-                print(f"\n  ⏭️  Skipping HRV (handled in dedicated HRV analysis section)")
+                print(f"\nSkipping HRV (handled in dedicated HRV analysis section)")
                 continue
                 
             print(f"\nAnalyzing metric: {metric}")
@@ -704,7 +743,7 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
                     
                     # INTRA-SUBJECT: Compare subjects together
                     if analysis_type == 'intra':
-                        print(f"  🔄 Intra-subject comparison: {len(selected_subjects)} subjects")
+                        print(f"Intra-subject comparison: {len(selected_subjects)} subjects")
                         
                         metric_results, metric_plots = analyze_metric_multi_subject(
                             manifest,
@@ -724,8 +763,8 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
                     
                     # INTER-SUBJECT: Analyze each subject separately
                     else:
-                        print(f"  📊 Inter-subject analysis: {len(selected_subjects)} subjects")
-                        print(f"  Running single-subject analysis for each subject...\n")
+                        print(f"Inter-subject analysis: {len(selected_subjects)} subjects")
+                        print(f"Running single-subject analysis for each subject...\n")
                         
                         for subject in selected_subjects:
                             print(f"  {'='*60}")
@@ -735,17 +774,17 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
                             subject_files = get_subject_files(manifest, subject)
                             
                             if not subject_files['event_markers']:
-                                print(f"    No event markers - skipping")
+                                print(f"No event markers - skipping")
                                 continue
                             
                             em_path = subject_files['event_markers']['path']
-                            print(f"  Loading event markers: {os.path.basename(em_path)}")
+                            print(f"Loading event markers: {os.path.basename(em_path)}")
                             df_subject_markers = pd.read_csv(em_path)
                             df_subject_markers = prepare_event_markers_timestamps(df_subject_markers)
                             
                             metric_file = find_metric_file_for_subject(subject_files, metric)
                             if not metric_file:
-                                print(f"    No {metric} file found - skipping")
+                                print(f"No {metric} file found - skipping")
                                 continue
                             
                             # Run single-subject analysis
@@ -777,7 +816,7 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
                                     results['plots'].extend(metric_plots)
                                     
                             except Exception as e:
-                                print(f"    Error analyzing subject: {e}")
+                                print(f"Error analyzing subject: {e}")
                                 continue
                             
                             print()  
@@ -786,19 +825,19 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
                 # SINGLE SUBJECT MODE (ORIGINAL LOGIC)
                 # ═══════════════════════════════════════════════════════════
                 else:
-                    print(f"  📊 Single subject analysis")
+                    print(f"Single subject analysis")
                     
                     event_markers_file = manifest.get('event_markers')
                     if event_markers_file:
                         em_path_parts = event_markers_file.get('path', '').split('/')
                         subject_from_em = em_path_parts[-2] if len(em_path_parts) >= 2 else None
-                        print(f"  Subject from event markers: {subject_from_em}")
+                        print(f"Subject from event markers: {subject_from_em}")
                         
                         print(f"\n  Available EmotiBit files:")
                         for idx, eb_file in enumerate(manifest['emotibit_files']):
-                            print(f"    [{idx}] {eb_file.get('filename', 'NO_FILENAME')}")
-                            print(f"        Path: {eb_file.get('path', 'NO_PATH')}")
-                            print(f"        Subject field: {eb_file.get('subject', 'NO_SUBJECT_FIELD')}")
+                            print(f"[{idx}] {eb_file.get('filename', 'NO_FILENAME')}")
+                            print(f"Path: {eb_file.get('path', 'NO_PATH')}")
+                            print(f"Subject field: {eb_file.get('subject', 'NO_SUBJECT_FIELD')}")
                         print()
                         
                         metric_file = None
@@ -808,9 +847,9 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
                                 file_subject = emotibit_file.get('subject', '')
                                 
                                 print(f"  Checking file: {os.path.basename(emotibit_file['filename'])}")
-                                print(f"    - File subject field: {file_subject}")
-                                print(f"    - Subject in path: {subject_from_em in file_path if subject_from_em else False}")
-                                print(f"    - Subject field match: {file_subject == subject_from_em}")
+                                print(f"- File subject field: {file_subject}")
+                                print(f"- Subject in path: {subject_from_em in file_path if subject_from_em else False}")
+                                print(f"- Subject field match: {file_subject == subject_from_em}")
                                 
                                 if subject_from_em and (file_subject == subject_from_em or subject_from_em in file_path):
                                     metric_file = emotibit_file['path']
@@ -874,19 +913,19 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
     else:
         print("Skipping analysis - no event markers or metrics selected\n")
     
-    print("4. FINALIZING RESULTS")
+    print("5. FINALIZING RESULTS")
     print("-" * 80)
     
     results['status'] = 'completed' if len(results['errors']) == 0 else 'completed_with_errors'
     
     print(f"Analysis complete!")
     print(f". Status: {results['status']}")
-    print(f"  Plots generated: {len(results['plots'])}")
-    print(f"  Metrics analyzed: {len(results.get('analysis', {}))}")
+    print(f"Plots generated: {len(results['plots'])}")
+    print(f"Metrics analyzed: {len(results.get('analysis', {}))}")
     if results['errors']:
-        print(f"  Errors: {len(results['errors'])}")
+        print(f"Errors: {len(results['errors'])}")
     if results['warnings']:
-        print(f"  Warnings: {len(results['warnings'])}")
+        print(f"Warnings: {len(results['warnings'])}")
     
     print("\n" + "="*80)
     print("ANALYSIS COMPLETE")
@@ -930,9 +969,9 @@ def analyze_metric(metric_file, df_markers, comparison_groups, metric,
         )
 
     if len(df_metric) == 0:
-        print(f"❌ ERROR: All data removed during cleaning")
-        print(f"   Metric: {metric}")
-        print(f"   This suggests the data may be in wrong units or have fundamental issues")
+        print(f"ERROR: All data removed during cleaning")
+        print(f"Metric: {metric}")
+        print(f"This suggests the data may be in wrong units or have fundamental issues")
         return None, []
     
     print(f"Calculating timestamp offset...")
@@ -1042,7 +1081,7 @@ def analyze_metric_multi_subject(manifest, selected_subjects, comparison_groups,
     Returns:
         Tuple of (metric_results dict, plots list)
     """
-    print(f"  Loading data for {len(selected_subjects)} subjects...")
+    print(f"Loading data for {len(selected_subjects)} subjects...")
     
     # Data structure: {composite_label: DataFrame}
     group_data_raw = {}
@@ -1052,7 +1091,7 @@ def analyze_metric_multi_subject(manifest, selected_subjects, comparison_groups,
     # ═══════════════════════════════════════════════════════════════
     metric_col_name = None 
     for subject in selected_subjects:
-        print(f"\n  Processing subject: {subject}")
+        print(f"\nProcessing subject: {subject}")
         
         # Get files specific to this subject
         subject_files = get_subject_files(manifest, subject)
@@ -1076,7 +1115,7 @@ def analyze_metric_multi_subject(manifest, selected_subjects, comparison_groups,
         
         if metric_col_name is None:
             metric_col_name = df_metric.columns[-1]
-            print(f"  Detected metric column: '{metric_col_name}'")
+            print(f"Detected metric column: '{metric_col_name}'")
 
         # Apply data cleaning if enabled
         if cleaning_enabled:
@@ -1137,13 +1176,13 @@ def analyze_metric_multi_subject(manifest, selected_subjects, comparison_groups,
         try:
             processed_data = apply_analysis_method(data, metric_col_name, analysis_method)
             group_data_processed[composite_label] = processed_data
-            print(f"    {composite_label}: {len(processed_data)} points")
+            print(f"{composite_label}: {len(processed_data)} points")
         except Exception as e:
             print(f"Error processing '{composite_label}': {e}")
             continue
     
     if len(group_data_processed) == 0:
-        print(f"  Warning: No successfully processed data")
+        print(f"Warning: No successfully processed data")
         return None, []
     
     # ═══════════════════════════════════════════════════════════════
@@ -1337,3 +1376,270 @@ def generate_hrv_plot(data, param, plot_type, output_folder):
         print(f"Could not generate {plot_type} plot: {e}")
         plt.close('all')
         return None
+    
+def analyze_external_data(manifest, external_configs, comparison_groups, output_folder,
+                          batch_mode=False, selected_subjects=None, analysis_method='raw',
+                          plot_type='lineplot', cleaning_enabled=False, cleaning_stages=None):
+    """
+    Analyze external CSV data files based on user configuration.
+    
+    Args:
+        manifest: File manifest with external_files
+        external_configs: Dict of {subject: {filename: config}}
+        comparison_groups: List of event/condition groups
+        output_folder: Where to save plots
+        batch_mode: Whether analyzing multiple subjects
+        selected_subjects: List of subjects to analyze
+        analysis_method: 'raw', 'mean', 'moving_average', 'rmssd'
+        plot_type: Type of visualization
+        cleaning_enabled: Whether to apply data cleaning
+        cleaning_stages: Which cleaning stages to apply
+        
+    Returns:
+        Tuple of (results_dict, plots_list)
+    """
+    print(f"  Processing external data files from {len(external_configs)} subject(s)")
+    
+    all_results = {}
+    all_plots = []
+    
+    # Process each subject's external files
+    for subject, files_config in external_configs.items():
+        print(f"\n  Subject: {subject}")
+        
+        # Skip if subject not selected
+        if batch_mode and selected_subjects and subject not in selected_subjects:
+            print(f"    Skipping (not in selected subjects)")
+            continue
+        
+        # Load event markers for this subject
+        df_markers = load_event_markers_for_subject(manifest, subject, batch_mode)
+        if df_markers is None:
+            print(f"    No event markers found - skipping")
+            continue
+        
+        # Process each selected external file for this subject
+        for filename, config in files_config.items():
+            if not config.get('selected', True):
+                print(f"    Skipping {filename} (not selected)")
+                continue
+            
+            print(f"\n    Processing: {filename}")
+            
+            # Find the file in manifest
+            external_file = find_external_file_in_manifest(manifest, subject, filename)
+            if not external_file:
+                print(f"      File not found in manifest")
+                continue
+            
+            # Process each configured data column
+            for data_col_config in config.get('dataColumns', []):
+                if not data_col_config.get('column'):
+                    continue
+                
+                try:
+                    results, plots = process_external_file_column(
+                        external_file['path'],
+                        config,
+                        data_col_config,
+                        df_markers,
+                        comparison_groups,
+                        analysis_method,
+                        plot_type,
+                        output_folder,
+                        subject_label=subject,
+                        filename_label=filename,
+                        cleaning_enabled=cleaning_enabled,
+                        cleaning_stages=cleaning_stages
+                    )
+                    
+                    if results:
+                        # Create composite label
+                        display_name = data_col_config.get('displayName') or data_col_config['column']
+                        composite_label = f"{subject} - {filename} - {display_name}"
+                        
+                        all_results[composite_label] = results
+                        all_plots.extend(plots)
+                    
+                except Exception as e:
+                    print(f"      Error processing column {data_col_config['column']}: {e}")
+                    continue
+    
+    print(f"\n  External data analysis complete: {len(all_results)} data series processed")
+    return all_results, all_plots
+
+
+def load_event_markers_for_subject(manifest, subject, batch_mode):
+    """Load event markers for a specific subject."""
+    if batch_mode:
+        em_info = manifest.get('event_markers_by_subject', {}).get(subject)
+    else:
+        em_info = manifest.get('event_markers')
+    
+    if not em_info:
+        return None
+    
+    df = pd.read_csv(em_info['path'])
+    return prepare_event_markers_timestamps(df)
+
+
+def find_external_file_in_manifest(manifest, subject, filename):
+    """Find external file entry in manifest."""
+    for ext_file in manifest.get('external_files', []):
+        if ext_file.get('subject') == subject and ext_file.get('filename') == filename:
+            return ext_file
+    return None
+
+
+def process_external_file_column(file_path, config, data_col_config, df_markers,
+                                  comparison_groups, analysis_method, plot_type,
+                                  output_folder, subject_label='', filename_label='',
+                                  cleaning_enabled=False, cleaning_stages=None):
+    """
+    Process a single data column from an external CSV file.
+    
+    Args:
+        file_path: Path to external CSV file
+        config: File configuration from frontend
+        data_col_config: Configuration for this specific data column
+        df_markers: Event markers DataFrame
+        comparison_groups: Event/condition groups
+        analysis_method: Analysis method to apply
+        plot_type: Visualization type
+        output_folder: Where to save plots
+        subject_label: Subject identifier
+        filename_label: Filename for labeling
+        cleaning_enabled: Whether to clean data
+        cleaning_stages: Cleaning stages to apply
+        
+    Returns:
+        Tuple of (results_dict, plots_list)
+    """
+    print(f"      Loading column: {data_col_config['column']}")
+    
+    # Load external CSV
+    df = pd.read_csv(file_path)
+    
+    # Get column names from config
+    timestamp_col = config['timestampColumn']
+    data_col = data_col_config['column']
+    display_name = data_col_config.get('displayName') or data_col
+    
+    if timestamp_col not in df.columns or data_col not in df.columns:
+        print(f"        ERROR: Required columns not found")
+        return None, []
+    
+    # Convert timestamp to unix format based on user's selection
+    timestamp_format = config.get('timestampFormat', 'seconds')
+    
+    if timestamp_format == 'seconds':
+        # Seconds since experiment start - need to align with event markers
+        df['UnixTimestamp'] = df[timestamp_col]
+    elif timestamp_format == 'milliseconds':
+        # Convert milliseconds to seconds
+        df['UnixTimestamp'] = df[timestamp_col] / 1000.0
+    elif timestamp_format == 'unix':
+        # Already unix timestamp
+        df['UnixTimestamp'] = df[timestamp_col]
+    
+    # Create a standardized DataFrame structure similar to EmotiBit
+    df_processed = pd.DataFrame({
+        'LocalTimestamp': df['UnixTimestamp'],
+        data_col: df[data_col]
+    })
+    
+    # Apply data cleaning if enabled
+    if cleaning_enabled:
+        from DataCleaner import BiometricDataCleaner
+        # Try to infer metric type from display name, otherwise use generic
+        metric_type = 'default'
+        cleaner = BiometricDataCleaner(metric_type=metric_type)
+        df_processed = cleaner.clean(
+            df_processed,
+            data_col,
+            timestamp_col='LocalTimestamp',
+            stages=cleaning_stages
+        )
+    
+    if len(df_processed) == 0:
+        print(f"        WARNING: All data removed during cleaning")
+        return None, []
+    
+    # Calculate timestamp offset (external data might start at different time)
+    # If format is 'seconds' or 'milliseconds', we need to align with event markers
+    if timestamp_format in ['seconds', 'milliseconds']:
+        # Assume external data starts at same time as first event marker
+        first_event_time = df_markers['unix_timestamp'].min()
+        first_data_time = df_processed['LocalTimestamp'].min()
+        offset = first_event_time - first_data_time
+    else:
+        # Unix timestamp - calculate offset normally
+        offset = find_timestamp_offset(df_markers, df_processed)
+    
+    print(f"        Timestamp offset: {offset:.2f}s")
+    
+    # Extract data for each comparison group
+    group_data_raw = {}
+    
+    for group in comparison_groups:
+        group_label = group['label']
+        data = extract_window_data(df_processed, df_markers, offset, group)
+        
+        if len(data) > 0:
+            group_data_raw[group_label] = data
+            print(f"        {group_label}: {len(data)} points")
+    
+    if len(group_data_raw) == 0:
+        print(f"        No data extracted for any event")
+        return None, []
+    
+    # Apply analysis method
+    group_data_processed = {}
+    for group_label, data in group_data_raw.items():
+        try:
+            processed = apply_analysis_method(data, data_col, analysis_method)
+            group_data_processed[group_label] = processed
+        except Exception as e:
+            print(f"        Error processing {group_label}: {e}")
+            continue
+    
+    # Calculate statistics
+    results = {}
+    for group_label, data in group_data_processed.items():
+        stats = calculate_statistics(data, data_col, analysis_method)
+        results[group_label] = stats
+    
+    # Generate plots
+    plots = []
+    
+    # Main plot
+    if plot_type != 'barchart':
+        suffix = f"_ext_{subject_label}_{filename_label.replace('.csv', '')}"
+        plot = generate_plot(
+            group_data_processed,
+            data_col,
+            display_name,
+            plot_type,
+            analysis_method,
+            output_folder,
+            suffix=suffix,
+            subject_label=f"{subject_label} - {filename_label}"
+        )
+        if plot:
+            plots.append(plot)
+    
+    # Comparison plot
+    if len(group_data_processed) >= 2:
+        suffix = f"_ext_{subject_label}_{filename_label.replace('.csv', '')}"
+        comp_plot = generate_comparison_plot(
+            results,
+            display_name,
+            analysis_method,
+            output_folder,
+            suffix=suffix,
+            subject_label=f"{subject_label} - {filename_label}"
+        )
+        if comp_plot:
+            plots.append(comp_plot)
+    
+    return results, plots

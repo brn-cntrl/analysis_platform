@@ -739,7 +739,7 @@ class BiometricDataCleaner:
         
         removed = before - len(df)
         if removed > 0:
-            print(f"    ✓ Removed {removed} invalid values (NaN/inf/negative)")
+            print(f"    Removed {removed} invalid values (NaN/inf/negative)")
         
         return df
     
@@ -755,7 +755,7 @@ class BiometricDataCleaner:
         
         removed = before - len(df)
         if removed > 0:
-            print(f"    ✓ Removed {removed} physiological outliers (range: {self.thresholds['min']}-{self.thresholds['max']})")
+            print(f"    Removed {removed} physiological outliers (range: {self.thresholds['min']}-{self.thresholds['max']})")
         
         return df
     
@@ -779,7 +779,7 @@ class BiometricDataCleaner:
         
         removed = before - len(df)
         if removed > 0:
-            print(f"    ✓ Removed {removed} statistical outliers (modified z-score > {threshold})")
+            print(f"    Removed {removed} statistical outliers (modified z-score > {threshold})")
         
         return df
     
@@ -802,7 +802,7 @@ class BiometricDataCleaner:
         
         removed = before - len(df)
         if removed > 0:
-            print(f"    ✓ Removed {removed} sudden changes (rate > {max_change}/sec)")
+            print(f"    Removed {removed} sudden changes (rate > {max_change}/sec)")
         
         return df
     
@@ -822,7 +822,7 @@ class BiometricDataCleaner:
             interpolated = before_nan - after_nan
             
             if interpolated > 0:
-                print(f"    ✓ Interpolated {interpolated} missing values")
+                print(f"    Interpolated {interpolated} missing values")
             
             # Drop any remaining NaN
             df = df.dropna(subset=[metric_col])
@@ -833,6 +833,6 @@ class BiometricDataCleaner:
         """Apply median filter for noise reduction"""
         if len(df) > window:
             df[metric_col] = signal.medfilt(df[metric_col].values, kernel_size=window)
-            print(f"    ✓ Applied median filter (window={window})")
+            print(f"Applied median filter (window={window})")
         
         return df

@@ -648,7 +648,7 @@ def prepare_event_markers_timestamps(df):
     # NEW STRUCTURE: Check for timestamp_unix column
     # ═══════════════════════════════════════════════════════════
     if 'timestamp_unix' in df.columns:
-        print(f"  ✓ Found 'timestamp_unix' column (NEW format)")
+        print(f"Found 'timestamp_unix' column (NEW format)")
         df['unix_timestamp'] = df['timestamp_unix']
         
         # Drop invalid timestamps
@@ -658,9 +658,9 @@ def prepare_event_markers_timestamps(df):
         after_count = len(df)
         
         if before_count > after_count:
-            print(f"  ⚠ Dropped {before_count - after_count} rows with invalid timestamps")
+            print(f"Dropped {before_count - after_count} rows with invalid timestamps")
         
-        print(f"  ✓ Using {after_count} valid unix timestamps")
+        print(f"Using {after_count} valid unix timestamps")
         return df
     
     # ═══════════════════════════════════════════════════════════
@@ -678,11 +678,11 @@ def prepare_event_markers_timestamps(df):
     # Try to detect format
     if isinstance(sample_timestamp, (int, float)):
         # Already unix timestamp
-        print(f"  ✓ Found 'timestamp' column (numeric unix format)")
+        print(f"Found 'timestamp' column (numeric unix format)")
         df['unix_timestamp'] = df['timestamp']
     else:
         # ISO format string - need to convert
-        print(f"  ✓ Found 'timestamp' column (ISO format) - converting to unix_timestamp")
+        print(f"Found 'timestamp' column (ISO format) - converting to unix_timestamp")
         
         converted_timestamps = []
         invalid_count = 0
@@ -719,9 +719,9 @@ def prepare_event_markers_timestamps(df):
         after_count = len(df)
         
         if invalid_count > 0:
-            print(f"  ⚠ Dropped {invalid_count} rows with invalid timestamps")
+            print(f"Dropped {invalid_count} rows with invalid timestamps")
         
-        print(f"  ✓ Converted {after_count} timestamps from ISO to Unix format")
+        print(f"Converted {after_count} timestamps from ISO to Unix format")
     
     return df
 
@@ -744,9 +744,9 @@ def find_timestamp_offset(event_markers_df, emotibit_df):
     
     offset = event_marker_start - emotibit_start
     
-    print(f"  Event Marker Start: {datetime.fromtimestamp(event_marker_start)}")
-    print(f"  EmotiBit Start: {datetime.fromtimestamp(emotibit_start)}")
-    print(f"  Calculated Offset: {offset:.2f}s ({offset/3600:.2f} hours)")
+    print(f"Event Marker Start: {datetime.fromtimestamp(event_marker_start)}")
+    print(f"EmotiBit Start: {datetime.fromtimestamp(emotibit_start)}")
+    print(f"Calculated Offset: {offset:.2f}s ({offset/3600:.2f} hours)")
     
     return offset
 
@@ -808,7 +808,7 @@ def extract_window_data(emotibit_df, event_markers_df, offset, window_config):
     
     # SPECIAL CASE: "all" means entire experiment duration
     if event_marker == 'all':
-        print(f"  Analyzing entire experiment duration")
+        print(f"Analyzing entire experiment duration")
         return emotibit_df.copy()
     
     metric_col = emotibit_df.columns[-1]
@@ -820,14 +820,14 @@ def extract_window_data(emotibit_df, event_markers_df, offset, window_config):
         if 'condition' in event_markers_df.columns:
             marker_rows = marker_rows[marker_rows['condition'] == condition_marker]
         else:
-            print(f"  ⚠ Warning: Condition column not found in event markers")
+            print(f"Warning: Condition column not found in event markers")
     
     if len(marker_rows) == 0:
-        print(f"  ⚠ Warning: No occurrences of event marker '{event_marker}'" + 
+        print(f"Warning: No occurrences of event marker '{event_marker}'" + 
               (f" with condition '{condition_marker}'" if condition_marker else "") + " found")
         return pd.DataFrame()
     
-    print(f"  Found {len(marker_rows)} occurrences of '{event_marker}'" +
+    print(f"Found {len(marker_rows)} occurrences of '{event_marker}'" +
           (f" with condition '{condition_marker}'" if condition_marker else ""))
     
     all_data = []
@@ -868,7 +868,7 @@ def extract_window_data(emotibit_df, event_markers_df, offset, window_config):
         return pd.DataFrame()
     
     combined_data = pd.concat(all_data, ignore_index=True)
-    print(f"  Extracted {len(combined_data)} data points across all occurrences")
+    print(f"Extracted {len(combined_data)} data points across all occurrences")
     
     return combined_data
 
@@ -890,13 +890,13 @@ def get_subject_files(manifest, subject_name):
     if 'event_markers_by_subject' in manifest:
         subject_files['event_markers'] = manifest['event_markers_by_subject'].get(subject_name)
         if subject_files['event_markers']:
-            print(f"  ✓ Found event markers for {subject_name} (batch mode)")
+            print(f"Found event markers for {subject_name} (batch mode)")
     
     # Priority 2: Check single event markers file (backward compatibility)
     if not subject_files['event_markers'] and manifest.get('event_markers'):
         if subject_name in manifest['event_markers'].get('path', ''):
             subject_files['event_markers'] = manifest['event_markers']
-            print(f"  ✓ Found event markers for {subject_name} (single subject mode)")
+            print(f"Found event markers for {subject_name} (single subject mode)")
     
     # Filter respiration files for this subject
     for resp_file in manifest.get('respiration_files', []):
@@ -911,10 +911,10 @@ def get_subject_files(manifest, subject_name):
             subject_files['external_files'].append(external_file)
     
     # DEBUG: Log what was found
-    print(f"\n  Subject files for {subject_name}:")
-    print(f"    - EmotiBit: {len(subject_files['emotibit_files'])} files")
-    print(f"    - Event markers: {'✓' if subject_files['event_markers'] else '❌ MISSING'}")
-    print(f"    - External data: {len(subject_files['external_files'])} files")
+    print(f"\nSubject files for {subject_name}:")
+    print(f"- EmotiBit: {len(subject_files['emotibit_files'])} files")
+    print(f"- Event markers: {'✓' if subject_files['event_markers'] else '❌ MISSING'}")
+    print(f"- External data: {len(subject_files['external_files'])} files")
     
     return subject_files
 

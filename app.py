@@ -194,9 +194,9 @@ def upload_folder_and_analyze():
                     if config.get('selected', True):  # Default to True if not specified
                         selected_files += 1
             
-            print(f"✓ Parsed external data configs for {len(external_configs)} subjects")
-            print(f"  Total external files: {total_files}")
-            print(f"  Selected for analysis: {selected_files}")
+            print(f"Parsed external data configs for {len(external_configs)} subjects")
+            print(f"Total external files: {total_files}")
+            print(f"Selected for analysis: {selected_files}")
             
             # Filter to only selected files
             filtered_configs = {}
@@ -214,7 +214,7 @@ def upload_folder_and_analyze():
                 if len(files) > 0
             }
             
-            print(f"  Subjects with selected files: {len(external_configs)}")
+            print(f"Subjects with selected files: {len(external_configs)}")
             
         except json.JSONDecodeError as e:
             print(f"Failed to parse external data configs: {e}")
@@ -325,7 +325,7 @@ def upload_folder_and_analyze():
                         'path': file_path,
                         'relative_path': relative_path
                     }
-                    print(f"  ✓ Event markers for {subject_name}: {file.filename}")
+                    print(f"Event markers for {subject_name}: {file.filename}")
                 else:
                     # Single subject - backward compatibility
                     file_manifest['event_markers'] = {
@@ -334,19 +334,19 @@ def upload_folder_and_analyze():
                         'relative_path': relative_path
                     }
             elif 'external_data' in path.lower() and filename_lower.endswith('.csv'):
-                print(f"   CLASSIFIED AS EXTERNAL DATA FILE")
+                print(f"CLASSIFIED AS EXTERNAL DATA FILE")
                 file_manifest['external_files'].append({
                     'filename': file.filename,
                     'path': file_path,
                     'relative_path': relative_path,
                     'subject': subject_name
                 })
-                print(f"  External data file for {subject_name}: {file.filename}")
+                print(f"External data file for {subject_name}: {file.filename}")
             else:
                 # ============================================================================
                 # DEBUG: Catch unclassified files
                 # ============================================================================
-                print(f"   ⚠️  UNCLASSIFIED - adding to other_files")
+                print(f"UNCLASSIFIED - adding to other_files")
                 file_manifest['other_files'].append({
                     'filename': file.filename,
                     'path': file_path,
@@ -397,15 +397,15 @@ def upload_folder_and_analyze():
         # DEBUG: Print manifest summary
         # ============================================================================
         print("\nMANIFEST SUMMARY:")
-        print(f"  EmotiBit files: {len(file_manifest['emotibit_files'])}")
-        print(f"  External files: {len(file_manifest.get('external_files', []))}")
+        print(f"EmotiBit files: {len(file_manifest['emotibit_files'])}")
+        print(f"External files: {len(file_manifest.get('external_files', []))}")
         if batch_mode:
-            print(f"  Event markers (by subject): {len(file_manifest.get('event_markers_by_subject', {}))}")
+            print(f"Event markers (by subject): {len(file_manifest.get('event_markers_by_subject', {}))}")
             for subj, em_file in file_manifest.get('event_markers_by_subject', {}).items():
                 print(f"    - {subj}: {em_file['filename']}")
         else:
             em = file_manifest.get('event_markers')
-            print(f"  Event markers: {em['filename'] if em else 'None'}")
+            print(f"Event markers: {em['filename'] if em else 'None'}")
         print()
         
         print("Running analysis...")
