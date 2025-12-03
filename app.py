@@ -220,6 +220,38 @@ def upload_folder_and_analyze():
             print(f"Failed to parse external data configs: {e}")
             external_configs = {}
 
+    # Parse respiratory data configs
+    has_respiratory_data = request.form.get('has_respiratory_data', 'false') == 'true'
+    respiratory_configs = {}
+    if has_respiratory_data:
+        respiratory_configs_json = request.form.get('respiratory_configs', '{}')
+        try:
+            respiratory_configs = json.loads(respiratory_configs_json)
+            
+            selected_count = sum(1 for config in respiratory_configs.values() if config.get('selected', True))
+            print(f"✓ Parsed respiratory data configs for {len(respiratory_configs)} subjects")
+            print(f"  Selected for analysis: {selected_count} subjects")
+            
+        except json.JSONDecodeError as e:
+            print(f"Failed to parse respiratory data configs: {e}")
+            respiratory_configs = {}
+
+    # Parse cardiac data configs
+    has_cardiac_data = request.form.get('has_cardiac_data', 'false') == 'true'
+    cardiac_configs = {}
+    if has_cardiac_data:
+        cardiac_configs_json = request.form.get('cardiac_configs', '{}')
+        try:
+            cardiac_configs = json.loads(cardiac_configs_json)
+            
+            selected_count = sum(1 for config in cardiac_configs.values() if config.get('selected', True))
+            print(f"✓ Parsed cardiac data configs for {len(cardiac_configs)} subjects")
+            print(f"  Selected for analysis: {selected_count} subjects")
+            
+        except json.JSONDecodeError as e:
+            print(f"Failed to parse cardiac data configs: {e}")
+            cardiac_configs = {}
+
     print(f"\n{'='*80}")
     print(f"ANALYSIS REQUEST RECEIVED")
     print(f"{'='*80}")
@@ -424,6 +456,8 @@ def upload_folder_and_analyze():
             batch_mode=batch_mode,
             selected_subjects=selected_subjects,
             external_configs=external_configs,
+            respiratory_configs=respiratory_configs,
+            cardiac_configs=cardiac_configs,
             analysis_type=analysis_type,
             cleaning_enabled=cleaning_enabled,
             cleaning_stages=cleaning_stages
@@ -582,6 +616,63 @@ def scan_folder_data():
                 for file_data in files:
                     print(f"    - {file_data['filename']}: {len(file_data.get('columns', []))} columns")
 
+        # --- Process respiratory data files ---
+        # --- Process respiratory data files ---
+        respiratory_filenames_json = request.form.get('respiratory_filenames')
+        respiratory_files_by_subject = {}
+        
+        if respiratory_filenames_json:
+            respiratory_filenames = json.loads(respiratory_filenames_json)
+            print(f"Processing {len(respiratory_filenames)} respiratory file(s)")
+            
+            for filepath in respiratory_filenames:
+                parts = filepath.split('/')
+                # Expected format: root_folder/subject_name/respiratory_data/filename.csv
+                if len(parts) >= 3:
+                    subject = parts[1]
+                    file_name = parts[-1]
+                    
+                    if subject not in respiratory_files_by_subject:
+                        respiratory_files_by_subject[subject] = []
+                    
+                    respiratory_files_by_subject[subject].append({
+                        'filename': file_name,
+                        'path': filepath
+                    })
+            
+            if respiratory_files_by_subject:
+                print(f"Found respiratory data for {len(respiratory_files_by_subject)} subject(s)")
+                for subject, files in respiratory_files_by_subject.items():
+                    print(f"  Subject {subject}: {len(files)} respiratory file(s)")
+
+        # --- Process cardiac data files ---
+        cardiac_filenames_json = request.form.get('cardiac_filenames')
+        cardiac_files_by_subject = {}
+        
+        if cardiac_filenames_json:
+            cardiac_filenames = json.loads(cardiac_filenames_json)
+            print(f"Processing {len(cardiac_filenames)} cardiac file(s)")
+            
+            for filepath in cardiac_filenames:
+                parts = filepath.split('/')
+                # Expected format: root_folder/subject_name/cardiac_data/filename.csv
+                if len(parts) >= 3:
+                    subject = parts[1]
+                    file_name = parts[-1]
+                    
+                    if subject not in cardiac_files_by_subject:
+                        cardiac_files_by_subject[subject] = []
+                    
+                    cardiac_files_by_subject[subject].append({
+                        'filename': file_name,
+                        'path': filepath
+                    })
+            
+            if cardiac_files_by_subject:
+                print(f"Found cardiac data for {len(cardiac_files_by_subject)} subject(s)")
+                for subject, files in cardiac_files_by_subject.items():
+                    print(f"  Subject {subject}: {len(files)} cardiac file(s)")
+
         # --- Process EmotiBit metrics and event markers ---
         exclude_tags = {'timesyncs', 'timesyncmap'}
         subject_availability = {}
@@ -708,9 +799,19 @@ def scan_folder_data():
                 'has_files': len(external_files_by_subject) > 0,
                 'files_by_subject': external_files_by_subject,
                 'subjects_with_external': list(external_files_by_subject.keys())
+            },
+            'respiratory_data': {
+                'has_files': len(respiratory_files_by_subject) > 0,
+                'files_by_subject': respiratory_files_by_subject,
+                'subjects_with_respiratory': list(respiratory_files_by_subject.keys())
+            },
+            'cardiac_data': {
+                'has_files': len(cardiac_files_by_subject) > 0,
+                'files_by_subject': cardiac_files_by_subject,
+                'subjects_with_cardiac': list(cardiac_files_by_subject.keys())
             }
         }), 200
-
+    
     except Exception as e:
         print(f"Error scanning folder data: {e}")
         import traceback

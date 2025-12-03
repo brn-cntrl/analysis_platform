@@ -185,25 +185,51 @@ function ResultsViewer() {
         {results.analysis && Object.keys(results.analysis).length > 0 && (
         <div className="result-card">
             <h2 className="card-title">Analysis Results</h2>
-            {Object.entries(results.analysis).map(([metric, groupData]) => (
-            <div key={metric} className="metric-analysis">
-                <h3 className="section-title">{metric}</h3>
-                <div className="stats-grid">
-                {Object.entries(groupData).map(([groupLabel, stats]) => (
-                    <div key={groupLabel} className="stat-card">
-                    <div className="stat-label">{groupLabel}</div>
-                    <div className="stat-value">{stats.mean.toFixed(2)}</div>
-                    <div className="stat-detail">
-                        ±{stats.std.toFixed(2)} | n={stats.count}
+            {Object.entries(results.analysis).map(([metric, groupData]) => {
+              // Check if this is a flat structure (Respiratory/External) or nested (EmotiBit)
+              const isFlat = groupData.hasOwnProperty('mean') && groupData.hasOwnProperty('std');
+              
+              if (isFlat) {
+                // Flat structure: key is "Respiratory: Subject - RR - baseline", value is stats
+                return (
+                  <div key={metric} className="metric-analysis">
+                    <h3 className="section-title">{metric}</h3>
+                    <div className="stats-grid">
+                      <div className="stat-card">
+                        <div className="stat-value">{groupData.mean.toFixed(2)}</div>
+                        <div className="stat-detail">
+                          ±{groupData.std.toFixed(2)} | n={groupData.count}
+                        </div>
+                        <div className="stat-range">
+                          Range: {groupData.min.toFixed(2)} - {groupData.max.toFixed(2)}
+                        </div>
+                      </div>
                     </div>
-                    <div className="stat-range">
-                        Range: {stats.min.toFixed(2)} - {stats.max.toFixed(2)}
+                  </div>
+                );
+              } else {
+                // Nested structure: standard EmotiBit format
+                return (
+                  <div key={metric} className="metric-analysis">
+                    <h3 className="section-title">{metric}</h3>
+                    <div className="stats-grid">
+                      {Object.entries(groupData).map(([groupLabel, stats]) => (
+                        <div key={groupLabel} className="stat-card">
+                          <div className="stat-label">{groupLabel}</div>
+                          <div className="stat-value">{stats.mean.toFixed(2)}</div>
+                          <div className="stat-detail">
+                            ±{stats.std.toFixed(2)} | n={stats.count}
+                          </div>
+                          <div className="stat-range">
+                            Range: {stats.min.toFixed(2)} - {stats.max.toFixed(2)}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                    </div>
-                ))}
-                </div>
-            </div>
-            ))}
+                  </div>
+                );
+              }
+            })}
         </div>
         )}
 

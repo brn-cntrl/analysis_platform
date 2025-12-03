@@ -1,506 +1,3 @@
-"""
-BIOMETRIC DATA ANALYSIS ORCHESTRATION MODULE - LLM CONTRACT
-===========================================================
-
-PURPOSE:
-This module orchestrates end-to-end biometric data analysis workflows, coordinating data loading,
-event synchronization, metric extraction, statistical analysis, and visualization generation.
-It handles both single-subject and multi-subject studies with configurable analysis methods.
-
-ARCHITECTURE OVERVIEW:
----------------------
-┌─────────────────────────────────────────────────────────────┐
-│                      run_analysis()                         │
-│                   [Main Orchestrator]                       │
-└──────────┬──────────────────────────────────────────────────┘
-           │
-           ├──► analyze_hrv_from_ppg() ──► generate_hrv_plot()
-           │         [HRV Analysis]
-           │
-           ├──► analyze_metric() ──────────► Single Subject
-           │    [Single Metric Analysis]
-           │
-           └──► analyze_metric_multi_subject() ──► Multi-Subject Comparison
-                [Intra-Subject Analysis]
-
-CORE CONTRACT - run_analysis():
-===============================
-
-Entry Point: Primary analysis orchestration function
-
-Input Requirements:
-    Required:
-        - upload_folder: str, path to subject data directory
-        - manifest: dict with keys:
-            * 'emotibit_files': list of {filename, path, subject} dicts
-            * 'event_markers': dict with {path} OR
-            * 'event_markers_by_subject': dict mapping subjects to event marker files
-            * 'external_files': list (optional)
-        - selected_metrics: list of str, metric names to analyze (e.g., ['HR', 'EDA', 'TEMP'])
-        - comparison_groups: list of dicts with keys:
-            * 'label': str, group name
-            * 'condition': str, event condition filter
-            * 'window_before': float, seconds before event
-            * 'window_after': float, seconds after event
-    
-    Optional:
-        - analysis_method: str, one of ['raw', 'mean', 'moving_average', 'rmssd'] (default='raw')
-        - plot_type: str, one of ['lineplot', 'boxplot', 'scatter', 'poincare', 'barchart'] (default='lineplot')
-        - analyze_hrv: bool, enable HRV analysis (default=False)
-        - batch_mode: bool, multi-subject mode (default=False)
-        - selected_subjects: list of str, subject identifiers (required if batch_mode=True)
-        - analysis_type: str, 'inter' (separate) or 'intra' (compare) (default='inter')
-        - cleaning_enabled: bool, enable data cleaning (default=False)
-        - cleaning_stages: dict, cleaning configuration (default=None)
-
-Output Guarantees:
-    Returns dict with guaranteed structure:
-    {
-        'status': str,           # 'completed' | 'completed_with_errors' | 'processing'
-        'timestamp': str,        # ISO format datetime
-        'errors': list,          # Error messages (empty if success)
-        'warnings': list,        # Warning messages
-        'markers': dict,         # Event marker metadata
-        'analysis': dict,        # {metric: {group: stats}} nested structure
-        'plots': list,           # [{name, path, filename, url}] plot metadata
-        'hrv': dict | None,      # HRV results if analyze_hrv=True
-        'config': dict           # Analysis configuration echo
-    }
-
-Execution Flow:
-    1. Load and validate event markers (single or per-subject)
-    2. [Optional] Perform HRV analysis if analyze_hrv=True
-    3. For each selected metric:
-        a. Route to appropriate analysis function based on mode
-        b. Apply analysis method and generate statistics
-        c. Create visualizations
-    4. Aggregate results and return status
-
-ANALYSIS MODE CONTRACTS:
-========================
-
-MODE 1: Single Subject Analysis
---------------------------------
-Trigger: batch_mode=False OR (batch_mode=True AND len(selected_subjects)==1)
-Behavior:
-    - Analyzes one subject's data
-    - Matches metric files to event markers by subject identifier
-    - Generates individual plots for that subject
-Output: results['analysis'][metric] = {group_label: stats}
-
-MODE 2: Inter-Subject Analysis (Parallel)
-------------------------------------------
-Trigger: batch_mode=True AND analysis_type='inter' AND len(selected_subjects)>=1
-Behavior:
-    - Analyzes each subject INDEPENDENTLY in sequence
-    - Each subject gets separate event marker file and metric files
-    - Generates separate plots per subject
-    - Results are namespaced by subject
-Output: results['analysis'][metric][f"{subject} - {group}"] = stats
-Use Case: Compare how different subjects respond to same events
-
-MODE 3: Intra-Subject Analysis (Comparison)
---------------------------------------------
-Trigger: batch_mode=True AND analysis_type='intra' AND len(selected_subjects)>=2
-Behavior:
-    - Combines multiple subjects into single analysis
-    - Creates composite labels: "{subject} - {event_group}"
-    - Generates unified comparison visualizations
-    - All subjects on same plot for direct comparison
-Output: results['analysis'][metric] = {composite_label: stats}
-Use Case: Compare subjects side-by-side during same events
-Limitation: HRV analysis disabled (prevents timeout, 30-75s per subject)
-
-FUNCTION CONTRACT - analyze_metric():
-=====================================
-
-Purpose: Single metric analysis for one subject
-
-Input Requirements:
-    - metric_file: str, path to CSV with columns [LocalTimestamp, ..., metric_value]
-    - df_markers: DataFrame with event markers (from prepare_event_markers_timestamps)
-    - comparison_groups: list of group configurations
-    - metric: str, metric identifier (e.g., 'HR', 'EDA')
-    - analysis_method: str, processing method
-    - plot_type: str, visualization type
-    - output_folder: str, plot save directory
-    - subject_suffix: str, optional filename suffix (default='')
-    - subject_label: str, optional display label (default='')
-    - cleaning_enabled: bool, apply data cleaning (default=False)
-    - cleaning_stages: dict, cleaning configuration (default=None)
-
-Output:
-    Tuple: (metric_results: dict, plots: list)
-    - metric_results: {group_label: {mean, std, min, max, count, ...}}
-    - plots: [{name, path, filename, url}]
-    
-Returns (None, []) if:
-    - All data removed during cleaning
-    - No groups contain data
-    - Processing fails for all groups
-
-Processing Pipeline:
-    1. Load metric CSV file
-    2. [Optional] Apply data cleaning if cleaning_enabled=True
-    3. Calculate timestamp offset between markers and metric data
-    4. Extract windowed data for each comparison group
-    5. Apply analysis method (raw/mean/moving_average/rmssd)
-    6. Calculate statistics per group
-    7. Generate visualization(s)
-
-Data Cleaning Contract:
-    If cleaning_enabled=True:
-        - Uses BiometricDataCleaner with metric-specific validation rules
-        - Checks for wrong units (e.g., HR in milliseconds vs BPM)
-        - Removes outliers beyond physiologically valid ranges
-        - If ALL data removed → returns (None, []) with error message
-        - Preserves timestamp column 'LocalTimestamp'
-
-FUNCTION CONTRACT - analyze_metric_multi_subject():
-===================================================
-
-Purpose: Multi-subject comparison analysis (intra-subject mode)
-
-Input Requirements:
-    - manifest: dict, full file manifest with all subjects
-    - selected_subjects: list of str, subject identifiers
-    - comparison_groups: list of group configurations
-    - metric: str, metric identifier
-    - analysis_method: str, processing method
-    - plot_type: str, visualization type
-    - output_folder: str, plot save directory
-    - cleaning_enabled: bool (default=False)
-    - cleaning_stages: dict (default=None)
-
-Output:
-    Tuple: (metric_results: dict, plots: list)
-    - metric_results: {f"{subject} - {group}": stats}
-    - plots: unified visualizations with all subjects
-
-Processing Pipeline:
-    1. For each subject:
-        a. Load subject-specific metric file and event markers
-        b. [Optional] Apply data cleaning
-        c. Calculate timestamp offset
-        d. Extract windowed data for each comparison group
-        e. Create composite label: f"{subject} - {group_label}"
-    2. Apply analysis method to all subject-group combinations
-    3. Calculate statistics for all combinations
-    4. Generate unified comparison visualizations
-
-Composite Labeling:
-    Format: "{subject_name} - {event_group_label}"
-    Example: "P001 - Baseline", "P001 - Stress", "P002 - Baseline", "P002 - Stress"
-    Purpose: Enable cross-subject comparison in single visualization
-
-FUNCTION CONTRACT - analyze_hrv_from_ppg():
-===========================================
-
-Purpose: Heart Rate Variability analysis from Photoplethysmography signals
-
-Input Requirements:
-    - manifest: dict with 'emotibit_files' containing '_PI.csv' (infrared PPG)
-    - df_markers: DataFrame (currently unused, reserved for windowed HRV)
-    - comparison_groups: list (currently unused, reserved for future)
-    - output_folder: str, plot save directory
-
-Output:
-    Tuple: (hrv_results: dict, hrv_plots: list)
-    
-    hrv_results structure:
-    {
-        'num_peaks': int,              # Total R-peaks detected
-        'duration_minutes': float,     # Recording duration
-        'average_hr_bpm': float,      # Average heart rate
-        'sampling_rate': int,          # PPG sampling frequency
-        'indices': {                   # HRV metrics from neurokit2
-            'HRV_RMSSD': float,       # Time domain
-            'HRV_SDNN': float,        # Time domain
-            'HRV_LF': float,          # Frequency domain (low frequency)
-            'HRV_HF': float,          # Frequency domain (high frequency)
-            'HRV_SD1': float,         # Non-linear (Poincaré)
-            'HRV_SD2': float,         # Non-linear (Poincaré)
-            # ... additional HRV indices
-        }
-    }
-    
-    hrv_plots: 4 visualizations
-        1. PPG signal with detected peaks
-        2. Time domain analysis
-        3. Frequency domain analysis  
-        4. Non-linear analysis (Poincaré plot)
-
-Processing Pipeline:
-    1. Locate and load '_PI.csv' (infrared PPG signal)
-    2. Clean PPG signal using neurokit2.ppg_clean()
-    3. Detect R-peaks using neurokit2.ppg_process()
-    4. Calculate HRV indices using neurokit2.hrv()
-    5. Generate 4 standardized HRV plots
-
-Limitations:
-    - Analyzes ENTIRE recording (no windowing by events yet)
-    - Requires continuous PPG data
-    - Disabled in intra-subject mode (timeout risk: 30-75s per subject)
-
-FUNCTION CONTRACT - generate_hrv_plot():
-========================================
-
-Purpose: Create individual HRV visualization with consistent formatting
-
-Input Requirements:
-    - data: varies by plot_type (signals DataFrame, peaks array, etc.)
-    - param: varies by plot_type (info dict, sampling_rate int, etc.)
-    - plot_type: str, one of ['signal', 'time', 'frequency', 'nonlinear']
-    - output_folder: str, save directory
-
-Output:
-    dict | None
-    Success: {'name': str, 'path': str, 'filename': str, 'url': str}
-    Failure: None (exception caught)
-
-Plot Type Specifications:
-    'signal':
-        - Size: 20×22 inches
-        - Shows: Raw PPG + detected peaks overlay
-        - Data: (signals DataFrame, info dict)
-        
-    'time':
-        - Size: 20×20 inches
-        - Shows: Time domain metrics (RMSSD, SDNN, pNN50, etc.)
-        - Data: (peaks array, sampling_rate int)
-        
-    'frequency':
-        - Size: 20×18 inches
-        - Shows: Power spectral density (LF, HF, VLF bands)
-        - Data: (peaks array, sampling_rate int)
-        
-    'nonlinear':
-        - Size: 22×20 inches
-        - Shows: Poincaré plot, DFA, sample entropy
-        - Data: (peaks array, sampling_rate int)
-
-Format Standards:
-    - DPI: 100
-    - Font sizes: Title=24, axis labels=16, ticks=12-18
-    - Saved as PNG with tight bounding box
-    - URL format: '/api/plot/{filename}'
-
-ERROR HANDLING PHILOSOPHY:
-=========================
-
-Graceful Degradation:
-    - Individual metric failures don't stop entire analysis
-    - Errors collected in results['errors'] list
-    - Warnings collected in results['warnings'] list
-    - Status reflects overall health: 'completed' | 'completed_with_errors'
-
-Fail-Fast Scenarios:
-    - Missing event markers → early return with error
-    - Invalid manifest structure → KeyError propagates
-    - Empty selected_metrics → skips analysis section
-
-Recoverable Scenarios:
-    - Missing metric file for one metric → skip that metric, continue others
-    - Empty data after cleaning → skip that subject/metric, log warning
-    - Plot generation failure → continue without that plot
-
-Logging Contract:
-    - Console output to stdout with structured sections (====, ----)
-    - Progress indicators for long operations
-    - Error details with traceback for debugging
-    - Final summary with counts (plots, metrics, errors, warnings)
-
-TIMESTAMP SYNCHRONIZATION:
-=========================
-
-Challenge: Event markers and biometric sensors use different clocks
-
-Solution: find_timestamp_offset() calculates alignment
-    - Compares marker timestamps with metric data timestamps
-    - Handles timezone differences and clock drift
-    - Returns offset value (seconds) to align streams
-
-Contract:
-    offset = find_timestamp_offset(df_markers, df_metric)
-    Postcondition: metric_timestamp + offset ≈ marker_timestamp (aligned)
-
-WINDOWING CONTRACT:
-==================
-
-Function: extract_window_data(df_metric, df_markers, offset, group)
-
-Purpose: Extract metric data surrounding specific events
-
-Group Configuration:
-    {
-        'label': str,           # Human-readable name
-        'condition': str,       # Event type to match
-        'window_before': float, # Seconds before event
-        'window_after': float   # Seconds after event
-    }
-
-Behavior:
-    1. Find all event markers matching group['condition']
-    2. For each matching event:
-        a. Calculate window: [event_time - before, event_time + after]
-        b. Extract metric rows within window
-        c. Adjust timestamps relative to event (t=0 at event)
-    3. Concatenate all windows into single DataFrame
-    4. Add 'AdjustedTimestamp' column (relative to event onset)
-
-Returns: DataFrame with schema [AdjustedTimestamp, metric_col]
-
-DEPENDENCIES:
-============
-
-External Libraries:
-    - pandas: Data manipulation
-    - numpy: Numerical operations
-    - matplotlib: Plotting (Agg backend for headless)
-    - neurokit2: HRV analysis
-    - scipy: Signal processing (via analysis_methods)
-
-Internal Modules:
-    - analysis_utils: Data loading, timestamp sync, windowing
-    - analysis_methods: Statistical transformations
-    - plot_generator: Visualization creation
-    - DataCleaner: Biometric data validation (optional)
-
-File System:
-    - Requires write access to output_folder
-    - Creates directory if not exists
-    - Generates PNG files with deterministic naming
-
-PLOT NAMING CONVENTIONS:
-=======================
-
-Format: {metric}_{plot_type}_{analysis_method}{suffix}.png
-
-Examples:
-    - HR_lineplot_raw.png
-    - EDA_boxplot_moving_average_P001.png
-    - TEMP_comparison_mean_multi_subject.png
-    - HRV_ppg_signal.png (HRV plots have fixed names)
-
-Special Cases:
-    - Comparison plots: {metric}_comparison_{method}{suffix}.png
-    - HRV plots: HRV_{domain}.png where domain in [ppg_signal, time_domain, frequency_domain, nonlinear]
-
-USAGE EXAMPLES:
-==============
-
-Example 1 - Single Subject, Basic Analysis:
-    >>> manifest = {
-    ...     'emotibit_files': [
-    ...         {'filename': 'subject1_HR.csv', 'path': '/data/subject1_HR.csv', 'subject': 'subject1'},
-    ...         {'filename': 'subject1_EDA.csv', 'path': '/data/subject1_EDA.csv', 'subject': 'subject1'}
-    ...     ],
-    ...     'event_markers': {'path': '/data/subject1_events.csv'}
-    ... }
-    >>> groups = [
-    ...     {'label': 'Baseline', 'condition': 'rest', 'window_before': 30, 'window_after': 30},
-    ...     {'label': 'Stress', 'condition': 'task', 'window_before': 10, 'window_after': 60}
-    ... ]
-    >>> results = run_analysis(
-    ...     upload_folder='/data',
-    ...     manifest=manifest,
-    ...     selected_metrics=['HR', 'EDA'],
-    ...     comparison_groups=groups,
-    ...     analysis_method='moving_average',
-    ...     plot_type='lineplot'
-    ... )
-    >>> print(results['status'])  # 'completed'
-    >>> print(len(results['plots']))  # 4 plots (2 metrics × 2 plot types)
-
-Example 2 - Multi-Subject Comparison (Intra):
-    >>> manifest = {...}  # Contains multiple subjects
-    >>> results = run_analysis(
-    ...     upload_folder='/data',
-    ...     manifest=manifest,
-    ...     selected_metrics=['HR'],
-    ...     comparison_groups=groups,
-    ...     batch_mode=True,
-    ...     selected_subjects=['P001', 'P002', 'P003'],
-    ...     analysis_type='intra',  # Compare subjects together
-    ...     plot_type='boxplot'
-    ... )
-    >>> # Results contain composite labels like "P001 - Baseline", "P002 - Baseline"
-
-Example 3 - Multi-Subject Separate Analysis (Inter):
-    >>> results = run_analysis(
-    ...     upload_folder='/data',
-    ...     manifest=manifest,
-    ...     selected_metrics=['HR', 'EDA'],
-    ...     comparison_groups=groups,
-    ...     batch_mode=True,
-    ...     selected_subjects=['P001', 'P002'],
-    ...     analysis_type='inter',  # Analyze each separately
-    ...     analyze_hrv=True
-    ... )
-    >>> # Each subject gets independent analysis and plots
-
-Example 4 - HRV Analysis with Data Cleaning:
-    >>> results = run_analysis(
-    ...     upload_folder='/data',
-    ...     manifest=manifest,
-    ...     selected_metrics=['HR'],
-    ...     comparison_groups=groups,
-    ...     analyze_hrv=True,
-    ...     cleaning_enabled=True,
-    ...     cleaning_stages={'remove_outliers': True, 'check_units': True}
-    ... )
-    >>> print(results['hrv']['indices']['HRV_RMSSD'])  # Root mean square of successive differences
-
-INVARIANTS:
-==========
-
-1. Output Structure: results dict always contains all top-level keys, even if empty
-2. Plot Files: All generated plots physically exist at returned paths
-3. Timestamp Alignment: Within-group data shares consistent time reference
-4. Immutability: Input DataFrames never modified (copies used)
-5. Status Accuracy: status='completed' IFF len(errors)==0
-6. Plot Determinism: Same inputs → same plot filenames (supports caching)
-7. Metric Column: Last column of metric CSV is always the metric value column
-
-CONFIGURATION ECHO:
-==================
-
-results['config'] contains exact parameters used:
-    - Enables reproducibility
-    - Documents analysis provenance  
-    - Supports audit trails
-    - Facilitates result interpretation
-
-PERFORMANCE CHARACTERISTICS:
-===========================
-
-Complexity:
-    - Time: O(n_subjects × n_metrics × n_groups × n_samples)
-    - Space: O(n_samples) per metric (windowed data in memory)
-
-HRV Timing:
-    - Single subject: 30-75 seconds (neurokit2 processing)
-    - Multi-subject intra: DISABLED (timeout risk)
-    - Multi-subject inter: n × (30-75s) sequential
-
-Timeout Mitigation:
-    - HRV disabled for intra-subject mode with multiple subjects
-    - Explicit warning messages guide user to inter-subject mode
-
-EXTENSION POINTS:
-================
-
-1. New Analysis Methods: Add to analysis_methods module, update method_label mapping
-2. New Plot Types: Extend plot_generator module
-3. New Metrics: Add CSV files with standard format [LocalTimestamp, ..., value]
-4. Event-Windowed HRV: Uncomment/implement df_markers usage in analyze_hrv_from_ppg
-5. Custom Cleaning Rules: Extend DataCleaner with metric-specific validators
-
-VERSION: 1.0
-PYTHON: 3.8+
-REQUIRES: pandas>=1.3, numpy>=1.20, matplotlib>=3.3, neurokit2>=0.1
-"""
-
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -534,8 +31,8 @@ from plot_generator import (
 def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups, 
                  analysis_method='raw', plot_type='lineplot', analyze_hrv=False, 
                  output_folder='data/outputs', batch_mode=False, selected_subjects=None,
-                 external_configs=None, analysis_type='inter', cleaning_enabled=False,
-                 cleaning_stages=None): 
+                 external_configs=None, respiratory_configs=None, cardiac_configs=None,
+                 analysis_type='inter', cleaning_enabled=False, cleaning_stages=None):
     """
     Main entry point for analysis.
     
@@ -710,6 +207,82 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
             print()
         except Exception as e:
             error_msg = f"Error analyzing external data: {str(e)}"
+            print(f"ERROR: {error_msg}")
+            results['errors'].append(error_msg)
+            import traceback
+            traceback.print_exc()
+            print()
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # ANALYZE RESPIRATORY DATA FILES
+    # ═══════════════════════════════════════════════════════════════════════════
+    if respiratory_configs and len(respiratory_configs) > 0:
+        print(f"3b. ANALYZING RESPIRATORY DATA")
+        print("-" * 80)
+        
+        try:
+            respiratory_results, respiratory_plots = analyze_respiratory_data(
+                manifest,
+                respiratory_configs,
+                comparison_groups,
+                output_folder,
+                batch_mode=batch_mode,
+                selected_subjects=selected_subjects,
+                analysis_method=analysis_method,
+                plot_type=plot_type,
+                cleaning_enabled=cleaning_enabled,
+                cleaning_stages=cleaning_stages
+            )
+            
+            if respiratory_results:
+                # Merge respiratory results into main analysis results
+                for metric_label, stats in respiratory_results.items():
+                    results['analysis'][f"Respiratory: {metric_label}"] = stats
+                
+                results['plots'].extend(respiratory_plots)
+                print(f"  ✓ Analyzed {len(respiratory_results)} respiratory metrics")
+            
+            print()
+        except Exception as e:
+            error_msg = f"Error analyzing respiratory data: {str(e)}"
+            print(f"ERROR: {error_msg}")
+            results['errors'].append(error_msg)
+            import traceback
+            traceback.print_exc()
+            print()
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # ANALYZE CARDIAC DATA FILES
+    # ═══════════════════════════════════════════════════════════════════════════
+    if cardiac_configs and len(cardiac_configs) > 0:
+        print(f"3c. ANALYZING CARDIAC DATA")
+        print("-" * 80)
+        
+        try:
+            cardiac_results, cardiac_plots = analyze_cardiac_data(
+                manifest,
+                cardiac_configs,
+                comparison_groups,
+                output_folder,
+                batch_mode=batch_mode,
+                selected_subjects=selected_subjects,
+                analysis_method=analysis_method,
+                plot_type=plot_type,
+                cleaning_enabled=cleaning_enabled,
+                cleaning_stages=cleaning_stages
+            )
+            
+            if cardiac_results:
+                # Merge cardiac results into main analysis results
+                for metric_label, stats in cardiac_results.items():
+                    results['analysis'][f"Cardiac: {metric_label}"] = stats
+                
+                results['plots'].extend(cardiac_plots)
+                print(f"  ✓ Analyzed {len(cardiac_results)} cardiac metrics")
+            
+            print()
+        except Exception as e:
+            error_msg = f"Error analyzing cardiac data: {str(e)}"
             print(f"ERROR: {error_msg}")
             results['errors'].append(error_msg)
             import traceback
@@ -1638,6 +1211,521 @@ def process_external_file_column(file_path, config, data_col_config, df_markers,
             output_folder,
             suffix=suffix,
             subject_label=f"{subject_label} - {filename_label}"
+        )
+        if comp_plot:
+            plots.append(comp_plot)
+    
+    return results, plots
+
+def analyze_respiratory_data(manifest, respiratory_configs, comparison_groups, output_folder,
+                             batch_mode=False, selected_subjects=None, analysis_method='raw',
+                             plot_type='lineplot', cleaning_enabled=False, cleaning_stages=None):
+    """
+    Analyze respiratory (Vernier) data files.
+    
+    Args:
+        manifest: File manifest with respiration_files
+        respiratory_configs: Dict of {subject: {selected, analyzeRR, analyzeForce}}
+        comparison_groups: List of event/condition groups
+        output_folder: Where to save plots
+        batch_mode: Whether analyzing multiple subjects
+        selected_subjects: List of subjects to analyze
+        analysis_method: 'raw', 'mean', 'moving_average', 'rmssd'
+        plot_type: Type of visualization
+        cleaning_enabled: Whether to apply data cleaning
+        cleaning_stages: Which cleaning stages to apply
+        
+    Returns:
+        Tuple of (results_dict, plots_list)
+    """
+    print(f"  Processing respiratory data from {len(respiratory_configs)} subject(s)")
+    
+    all_results = {}
+    all_plots = []
+    
+    # Process each subject's respiratory data
+    for subject, config in respiratory_configs.items():
+        if not config.get('selected', True):
+            print(f"  Skipping {subject} (not selected)")
+            continue
+        
+        # Skip if subject not selected
+        if batch_mode and selected_subjects and subject not in selected_subjects:
+            print(f"  Skipping {subject} (not in selected subjects)")
+            continue
+        
+        print(f"\n  Subject: {subject}")
+        
+        # Load event markers for this subject
+        df_markers = load_event_markers_for_subject(manifest, subject, batch_mode)
+        if df_markers is None:
+            print(f"    No event markers found - skipping")
+            continue
+        
+        # Find respiratory file for this subject
+        resp_file = find_respiratory_file_for_subject(manifest, subject)
+        if not resp_file:
+            print(f"    No respiratory file found - skipping")
+            continue
+        
+        print(f"    Loading: {os.path.basename(resp_file)}")
+        
+        # Load respiratory data
+        df_resp = pd.read_csv(resp_file)
+        
+        # Detect header format (old vs new)
+        has_new_format = 'timestamp_unix' in df_resp.columns
+        
+        if has_new_format:
+            print(f"    Detected new header format")
+            # New format already has proper timestamps
+            if 'timestamp_unix' in df_resp.columns:
+                df_resp['LocalTimestamp'] = df_resp['timestamp_unix']
+            elif 'timestamp' in df_resp.columns:
+                # Need to parse ISO timestamp
+                df_resp['LocalTimestamp'] = pd.to_datetime(df_resp['timestamp']).apply(lambda x: x.timestamp())
+        else:
+            print(f"    Detected old header format")
+            # Old format: convert timestamp to unix
+            if 'timestamp' in df_resp.columns:
+                # Check if already numeric (unix) or string (ISO)
+                if pd.api.types.is_numeric_dtype(df_resp['timestamp']):
+                    df_resp['LocalTimestamp'] = df_resp['timestamp']
+                else:
+                    df_resp['LocalTimestamp'] = pd.to_datetime(df_resp['timestamp']).apply(lambda x: x.timestamp())
+        
+        # Calculate timestamp offset
+        offset = find_timestamp_offset(df_markers, df_resp)
+        
+        # Analyze RR if selected
+        if config.get('analyzeRR', True) and 'RR' in df_resp.columns:
+            print(f"\n    Analyzing RR (Respiratory Rate)")
+            try:
+                results, plots = analyze_respiratory_metric(
+                    df_resp,
+                    'RR',
+                    df_markers,
+                    offset,
+                    comparison_groups,
+                    analysis_method,
+                    plot_type,
+                    output_folder,
+                    subject_label=subject,
+                    cleaning_enabled=cleaning_enabled,
+                    cleaning_stages=cleaning_stages
+                )
+                
+                if results:
+                    for group_label, stats in results.items():
+                        composite_label = f"{subject} - RR - {group_label}"
+                        all_results[composite_label] = stats
+                    all_plots.extend(plots)
+                    
+            except Exception as e:
+                print(f"      Error analyzing RR: {e}")
+        
+        # Analyze Force if selected
+        if config.get('analyzeForce', True) and 'force' in df_resp.columns:
+            print(f"\n    Analyzing Force (Respiratory Effort)")
+            try:
+                results, plots = analyze_respiratory_metric(
+                    df_resp,
+                    'force',
+                    df_markers,
+                    offset,
+                    comparison_groups,
+                    analysis_method,
+                    plot_type,
+                    output_folder,
+                    subject_label=subject,
+                    cleaning_enabled=cleaning_enabled,
+                    cleaning_stages=cleaning_stages
+                )
+                
+                if results:
+                    for group_label, stats in results.items():
+                        composite_label = f"{subject} - Force - {group_label}"
+                        all_results[composite_label] = stats
+                    all_plots.extend(plots)
+                    
+            except Exception as e:
+                print(f"      Error analyzing Force: {e}")
+    
+    print(f"\n  Respiratory data analysis complete: {len(all_results)} metrics processed")
+    return all_results, all_plots
+
+
+def find_respiratory_file_for_subject(manifest, subject):
+    """Find respiratory file for a specific subject."""
+    for resp_file in manifest.get('respiration_files', []):
+        if (resp_file.get('subject') == subject or 
+            subject in resp_file.get('path', '')):
+            return resp_file['path']
+    return None
+
+
+def analyze_respiratory_metric(df_resp, metric_col, df_markers, offset, comparison_groups,
+                               analysis_method, plot_type, output_folder, subject_label='',
+                               cleaning_enabled=False, cleaning_stages=None):
+    """
+    Analyze a single respiratory metric (RR or force).
+    
+    Args:
+        df_resp: DataFrame with respiratory data
+        metric_col: Column name ('RR' or 'force')
+        df_markers: Event markers DataFrame
+        offset: Timestamp offset
+        comparison_groups: Event/condition groups
+        analysis_method: Analysis method to apply
+        plot_type: Visualization type
+        output_folder: Where to save plots
+        subject_label: Subject identifier
+        cleaning_enabled: Whether to clean data
+        cleaning_stages: Cleaning stages to apply
+        
+    Returns:
+        Tuple of (results_dict, plots_list)
+    """
+    # Create standardized structure
+    df_processed = pd.DataFrame({
+        'LocalTimestamp': df_resp['LocalTimestamp'],
+        metric_col: df_resp[metric_col]
+    })
+    
+    # Apply data cleaning if enabled
+    if cleaning_enabled:
+        from DataCleaner import BiometricDataCleaner
+        # RR is like HR, force is like a force sensor
+        metric_type = 'HR' if metric_col == 'RR' else 'default'
+        cleaner = BiometricDataCleaner(metric_type=metric_type)
+        df_processed = cleaner.clean(
+            df_processed,
+            metric_col,
+            timestamp_col='LocalTimestamp',
+            stages=cleaning_stages
+        )
+    
+    if len(df_processed) == 0:
+        print(f"        WARNING: All data removed during cleaning")
+        return None, []
+    
+    # Extract data for each comparison group
+    group_data_raw = {}
+    
+    for group in comparison_groups:
+        group_label = group['label']
+        data = extract_window_data(df_processed, df_markers, offset, group)
+        
+        if len(data) > 0:
+            group_data_raw[group_label] = data
+            print(f"        {group_label}: {len(data)} points")
+    
+    if len(group_data_raw) == 0:
+        print(f"        No data extracted for any event")
+        return None, []
+    
+    # Apply analysis method
+    group_data_processed = {}
+    for group_label, data in group_data_raw.items():
+        try:
+            processed = apply_analysis_method(data, metric_col, analysis_method)
+            group_data_processed[group_label] = processed
+        except Exception as e:
+            print(f"        Error processing {group_label}: {e}")
+            continue
+    
+    # Calculate statistics
+    results = {}
+    for group_label, data in group_data_processed.items():
+        stats = calculate_statistics(data, metric_col, analysis_method)
+        results[group_label] = stats
+    
+    # Generate plots
+    plots = []
+    
+    # Use clean metric name for filename, display name for plot title
+    metric_name = 'RR' if metric_col == 'RR' else 'Force'
+    display_name = 'Respiratory Rate (RR)' if metric_col == 'RR' else 'Respiratory Effort (Force)'
+
+    # Main plot
+    if plot_type != 'barchart':
+        suffix = f"_resp_{subject_label}_{metric_col}"
+        plot = generate_plot(
+            group_data_processed,
+            metric_col,
+            metric_name,  # ✅ Use clean name for filename: 'RR' or 'Force'
+            plot_type,
+            analysis_method,
+            output_folder,
+            suffix=suffix,
+            subject_label=f"{subject_label} - Respiratory"
+        )
+        if plot:
+            plots.append(plot)
+    
+    # Comparison plot
+    if len(group_data_processed) >= 2:
+        suffix = f"_resp_{subject_label}_{metric_col}"
+        comp_plot = generate_comparison_plot(
+            results,
+            metric_name,
+            analysis_method,
+            output_folder,
+            suffix=suffix,
+            subject_label=f"{subject_label} - Respiratory"
+        )
+        if comp_plot:
+            plots.append(comp_plot)
+    
+    return results, plots
+
+def analyze_cardiac_data(manifest, cardiac_configs, comparison_groups, output_folder,
+                        batch_mode=False, selected_subjects=None, analysis_method='raw',
+                        plot_type='lineplot', cleaning_enabled=False, cleaning_stages=None):
+    """
+    Analyze cardiac (Polar H10) data files.
+    
+    Args:
+        manifest: File manifest with cardiac_files
+        cardiac_configs: Dict of {subject: {selected, analyzeHR, analyzeHRV}}
+        comparison_groups: List of event/condition groups
+        output_folder: Where to save plots
+        batch_mode: Whether analyzing multiple subjects
+        selected_subjects: List of subjects to analyze
+        analysis_method: 'raw', 'mean', 'moving_average', 'rmssd'
+        plot_type: Type of visualization
+        cleaning_enabled: Whether to apply data cleaning
+        cleaning_stages: Which cleaning stages to apply
+        
+    Returns:
+        Tuple of (results_dict, plots_list)
+    """
+    print(f"  Processing cardiac data from {len(cardiac_configs)} subject(s)")
+    
+    all_results = {}
+    all_plots = []
+    
+    # Process each subject's cardiac data
+    for subject, config in cardiac_configs.items():
+        if not config.get('selected', True):
+            print(f"  Skipping {subject} (not selected)")
+            continue
+        
+        # Skip if subject not selected
+        if batch_mode and selected_subjects and subject not in selected_subjects:
+            print(f"  Skipping {subject} (not in selected subjects)")
+            continue
+        
+        print(f"\n  Subject: {subject}")
+        
+        # Load event markers for this subject
+        df_markers = load_event_markers_for_subject(manifest, subject, batch_mode)
+        if df_markers is None:
+            print(f"    No event markers found - skipping")
+            continue
+        
+        # Find cardiac file for this subject
+        cardiac_file = find_cardiac_file_for_subject(manifest, subject)
+        if not cardiac_file:
+            print(f"    No cardiac file found - skipping")
+            continue
+        
+        print(f"    Loading: {os.path.basename(cardiac_file)}")
+        
+        # Load cardiac data
+        df_cardiac = pd.read_csv(cardiac_file)
+        
+        # Cardiac files already have timestamp_unix column
+        if 'timestamp_unix' in df_cardiac.columns:
+            df_cardiac['LocalTimestamp'] = df_cardiac['timestamp_unix']
+        elif 'timestamp' in df_cardiac.columns:
+            # Fallback: parse ISO timestamp
+            df_cardiac['LocalTimestamp'] = pd.to_datetime(df_cardiac['timestamp']).apply(lambda x: x.timestamp())
+        else:
+            print(f"    ERROR: No timestamp column found - skipping")
+            continue
+        
+        # Calculate timestamp offset
+        offset = find_timestamp_offset(df_markers, df_cardiac)
+        
+        # Analyze HR if selected
+        if config.get('analyzeHR', True) and 'HR' in df_cardiac.columns:
+            print(f"\n    Analyzing HR (Heart Rate)")
+            try:
+                results, plots = analyze_cardiac_metric(
+                    df_cardiac,
+                    'HR',
+                    df_markers,
+                    offset,
+                    comparison_groups,
+                    analysis_method,
+                    plot_type,
+                    output_folder,
+                    subject_label=subject,
+                    cleaning_enabled=cleaning_enabled,
+                    cleaning_stages=cleaning_stages
+                )
+                
+                if results:
+                    for group_label, stats in results.items():
+                        composite_label = f"{subject} - HR - {group_label}"
+                        all_results[composite_label] = stats
+                    all_plots.extend(plots)
+                    
+            except Exception as e:
+                print(f"      Error analyzing HR: {e}")
+        
+        # Analyze HRV if selected
+        if config.get('analyzeHRV', True) and 'HRV' in df_cardiac.columns:
+            print(f"\n    Analyzing HRV (Heart Rate Variability)")
+            try:
+                results, plots = analyze_cardiac_metric(
+                    df_cardiac,
+                    'HRV',
+                    df_markers,
+                    offset,
+                    comparison_groups,
+                    analysis_method,
+                    plot_type,
+                    output_folder,
+                    subject_label=subject,
+                    cleaning_enabled=cleaning_enabled,
+                    cleaning_stages=cleaning_stages
+                )
+                
+                if results:
+                    for group_label, stats in results.items():
+                        composite_label = f"{subject} - HRV - {group_label}"
+                        all_results[composite_label] = stats
+                    all_plots.extend(plots)
+                    
+            except Exception as e:
+                print(f"      Error analyzing HRV: {e}")
+    
+    print(f"\n  Cardiac data analysis complete: {len(all_results)} metrics processed")
+    return all_results, all_plots
+
+
+def find_cardiac_file_for_subject(manifest, subject):
+    """Find cardiac file for a specific subject."""
+    for cardiac_file in manifest.get('cardiac_files', []):
+        if (cardiac_file.get('subject') == subject or 
+            subject in cardiac_file.get('path', '')):
+            return cardiac_file['path']
+    return None
+
+
+def analyze_cardiac_metric(df_cardiac, metric_col, df_markers, offset, comparison_groups,
+                           analysis_method, plot_type, output_folder, subject_label='',
+                           cleaning_enabled=False, cleaning_stages=None):
+    """
+    Analyze a single cardiac metric (HR or HRV).
+    
+    Note: Polar H10 HRV is pre-calculated, unlike EmotiBit which computes from PPG.
+    This function treats HRV as a standard metric (not specialized neurokit2 analysis).
+    
+    Args:
+        df_cardiac: DataFrame with cardiac data
+        metric_col: Column name ('HR' or 'HRV')
+        df_markers: Event markers DataFrame
+        offset: Timestamp offset
+        comparison_groups: Event/condition groups
+        analysis_method: Analysis method to apply
+        plot_type: Visualization type
+        output_folder: Where to save plots
+        subject_label: Subject identifier
+        cleaning_enabled: Whether to clean data
+        cleaning_stages: Cleaning stages to apply
+        
+    Returns:
+        Tuple of (results_dict, plots_list)
+    """
+    # Create standardized structure
+    df_processed = pd.DataFrame({
+        'LocalTimestamp': df_cardiac['LocalTimestamp'],
+        metric_col: df_cardiac[metric_col]
+    })
+    
+    # Apply data cleaning if enabled
+    if cleaning_enabled:
+        from DataCleaner import BiometricDataCleaner
+        # Both HR and HRV use HR-type cleaning (physiological ranges)
+        metric_type = 'HR'
+        cleaner = BiometricDataCleaner(metric_type=metric_type)
+        df_processed = cleaner.clean(
+            df_processed,
+            metric_col,
+            timestamp_col='LocalTimestamp',
+            stages=cleaning_stages
+        )
+    
+    if len(df_processed) == 0:
+        print(f"        WARNING: All data removed during cleaning")
+        return None, []
+    
+    # Extract data for each comparison group
+    group_data_raw = {}
+    
+    for group in comparison_groups:
+        group_label = group['label']
+        data = extract_window_data(df_processed, df_markers, offset, group)
+        
+        if len(data) > 0:
+            group_data_raw[group_label] = data
+            print(f"        {group_label}: {len(data)} points")
+    
+    if len(group_data_raw) == 0:
+        print(f"        No data extracted for any event")
+        return None, []
+    
+    # Apply analysis method
+    group_data_processed = {}
+    for group_label, data in group_data_raw.items():
+        try:
+            processed = apply_analysis_method(data, metric_col, analysis_method)
+            group_data_processed[group_label] = processed
+        except Exception as e:
+            print(f"        Error processing {group_label}: {e}")
+            continue
+    
+    # Calculate statistics
+    results = {}
+    for group_label, data in group_data_processed.items():
+        stats = calculate_statistics(data, metric_col, analysis_method)
+        results[group_label] = stats
+    
+    # Generate plots
+    plots = []
+    
+    # Use metric name directly (already clean: 'HR', 'HRV')
+    metric_name = metric_col
+    
+    # Main plot
+    if plot_type != 'barchart':
+        suffix = f"_cardiac_{subject_label}_{metric_col}"
+        plot = generate_plot(
+            group_data_processed,
+            metric_col,
+            metric_name,
+            plot_type,
+            analysis_method,
+            output_folder,
+            suffix=suffix,
+            subject_label=f"{subject_label} - Cardiac"
+        )
+        if plot:
+            plots.append(plot)
+    
+    # Comparison plot
+    if len(group_data_processed) >= 2:
+        suffix = f"_cardiac_{subject_label}_{metric_col}"
+        comp_plot = generate_comparison_plot(
+            results,
+            metric_name,
+            analysis_method,
+            output_folder,
+            suffix=suffix,
+            subject_label=f"{subject_label} - Cardiac"
         )
         if comp_plot:
             plots.append(comp_plot)

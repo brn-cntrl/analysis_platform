@@ -39,6 +39,16 @@ function AnalysisViewer() {
   const [subjectsNeedingParser, setSubjectsNeedingParser] = useState([]);
   const [parserLaunchStatus, setParserLaunchStatus] = useState('');
 
+  // Respiratory data state
+  const [hasRespiratoryData, setHasRespiratoryData] = useState(false);
+  const [subjectsWithRespiratory, setSubjectsWithRespiratory] = useState([]);
+  const [respiratoryConfigs, setRespiratoryConfigs] = useState({});
+
+  // Cardiac data state
+  const [hasCardiacData, setHasCardiacData] = useState(false);
+  const [subjectsWithCardiac, setSubjectsWithCardiac] = useState([]);
+  const [cardiacConfigs, setCardiacConfigs] = useState({});
+
   // Wizard state
   const [showConfigWizard, setShowConfigWizard] = useState(false);
   const [wizardStep, setWizardStep] = useState(0);
@@ -69,12 +79,24 @@ function AnalysisViewer() {
     if (selectedSubjectsList.length === 0) {
       issues.push('No subjects selected');
     }
-    
+
+    // Check if ANY data type is selected (not just biometric tags)
     const selectedMetricsList = Object.keys(selectedMetrics).filter(m => selectedMetrics[m]);
-    if (selectedMetricsList.length === 0) {
-      issues.push('No biometric tags selected');
+    const hasRespiratorySelected = hasRespiratoryData && Object.values(respiratoryConfigs).some(c => c.selected);
+    const hasCardiacSelected = hasCardiacData && Object.values(cardiacConfigs).some(c => c.selected);
+    const hasExternalSelected = hasExternalFiles && selectedSubjectsList.some(subject => {
+      if (subjectsWithExternal.includes(subject) && externalConfigs[subject]) {
+        return Object.values(externalConfigs[subject]).some(config => config.selected !== false);
+      }
+      return false;
+    });
+
+    const hasAnyDataSelected = selectedMetricsList.length > 0 || hasRespiratorySelected || hasCardiacSelected || hasExternalSelected;
+
+    if (!hasAnyDataSelected) {
+      issues.push('No data selected for analysis (select EmotiBit metrics, respiratory, cardiac, or external data)');
     }
-    
+
     const hasValidEvent = selectedEvents.some(e => e.event !== '');
     if (!hasValidEvent) {
       issues.push('No event markers selected');
@@ -96,6 +118,33 @@ function AnalysisViewer() {
               issues.push(`External (${subject}/${filename}): No data columns configured`);
             }
           });
+        }
+      });
+    }
+    // Validate respiratory data configuration
+    if (hasRespiratoryData) {
+      selectedSubjectsList.forEach(subject => {
+        if (subjectsWithRespiratory.includes(subject)) {
+          const config = respiratoryConfigs[subject];
+          if (config && config.selected) {
+            if (!config.analyzeRR && !config.analyzeForce) {
+              issues.push(`Respiratory (${subject}): No metrics selected (select RR or Force)`);
+            }
+          }
+        }
+      });
+    }
+
+    // Validate cardiac data configuration
+    if (hasCardiacData) {
+      selectedSubjectsList.forEach(subject => {
+        if (subjectsWithCardiac.includes(subject)) {
+          const config = cardiacConfigs[subject];
+          if (config && config.selected) {
+            if (!config.analyzeHR && !config.analyzeHRV) {
+              issues.push(`Cardiac (${subject}): No metrics selected (select HR or HRV)`);
+            }
+          }
         }
       });
     }
@@ -125,7 +174,7 @@ function AnalysisViewer() {
     
     console.log('Validation complete. Issues found:', issues);
     setConfigIssues(issues);
-  }, [selectedSubjects, selectedMetrics, selectedEvents, hasExternalFiles, subjectsWithExternal, externalConfigs, subjectAvailability]);
+  }, [selectedSubjects, selectedMetrics, selectedEvents, hasExternalFiles, subjectsWithExternal, externalConfigs, hasRespiratoryData, subjectsWithRespiratory, respiratoryConfigs, hasCardiacData, subjectsWithCardiac, cardiacConfigs, subjectAvailability]);
 
   useEffect(() => {
     console.log('availableMetrics changed:', availableMetrics);
@@ -133,17 +182,20 @@ function AnalysisViewer() {
   }, [availableMetrics]);
 
   useEffect(() => {
-    if (wizardStep === (hasExternalFiles ? 8 : 7) && showConfigWizard) {
+    // Calculate review step dynamically
+    const reviewStep = (() => {
+      let step = 5; // Base steps before review
+      if (hasRespiratoryData) step++;
+      if (hasCardiacData) step++;
+      if (hasExternalFiles) step++;
+      return step;
+    })();
+    
+    if (wizardStep === reviewStep && showConfigWizard) {
       console.log('Reached review step, validating configuration...');
-      console.log('Current state:', {
-        selectedSubjects,
-        selectedMetrics,
-        selectedEvents,
-        subjectAvailability
-      });
       validateConfiguration();
     }
-  }, [wizardStep, showConfigWizard, hasExternalFiles, validateConfiguration, selectedSubjects, selectedMetrics, selectedEvents, subjectAvailability]);
+  }, [wizardStep, showConfigWizard, hasExternalFiles, hasRespiratoryData, hasCardiacData, validateConfiguration]);
 
   useEffect(() => {
     const handleBeforeUnload = (e) => {
@@ -191,7 +243,7 @@ function AnalysisViewer() {
       
       if (validPlot) {
         setSelectedPlotType(validPlot);
-        setUploadStatus(`⚠️ Plot type auto-corrected to ${validPlot}: ${selectedPlotType} is not compatible with ${selectedAnalysisMethod} analysis`);
+        setUploadStatus(`Plot type auto-corrected to ${validPlot}: ${selectedPlotType} is not compatible with ${selectedAnalysisMethod} analysis`);
       }
     }
   }, [selectedAnalysisMethod, selectedPlotType, setUploadStatus]);
@@ -470,6 +522,18 @@ function AnalysisViewer() {
       formData.append('external_metadata', JSON.stringify(externalMetadata));
     }
 
+    if (structure.respirationFiles.length > 0) {
+      const respiratoryPaths = structure.respirationFiles.map(f => f.path);
+      formData.append('respiratory_filenames', JSON.stringify(respiratoryPaths));
+      console.log(`Sending ${respiratoryPaths.length} respiratory file path(s) to backend`);
+    }
+    
+    if (structure.cardiacFiles.length > 0) {
+      const cardiacPaths = structure.cardiacFiles.map(f => f.path);
+      formData.append('cardiac_filenames', JSON.stringify(cardiacPaths));
+      console.log(`Sending ${cardiacPaths.length} cardiac file path(s) to backend`);
+    }
+
     try { 
       const response = await fetch('/api/scan-folder-data', {
         method: 'POST',
@@ -553,6 +617,47 @@ function AnalysisViewer() {
           setExternalFilesBySubject({});
         }
 
+        // Process respiratory data detection
+        if (data.respiratory_data && data.respiratory_data.has_files) {
+          console.log('Respiratory data files detected:', data.respiratory_data.files_by_subject);
+          setSubjectsWithRespiratory(data.respiratory_data.subjects_with_respiratory);
+          setHasRespiratoryData(true);
+          
+          // Initialize respiratory configs
+          const initialRespConfigs = {};
+          data.respiratory_data.subjects_with_respiratory.forEach(subject => {
+            initialRespConfigs[subject] = {
+              selected: true,
+              analyzeRR: true,
+              analyzeForce: true
+            };
+          });
+          setRespiratoryConfigs(initialRespConfigs);
+        } else {
+          setHasRespiratoryData(false);
+          setSubjectsWithRespiratory([]);
+        }
+        // Process cardiac data detection
+        if (data.cardiac_data && data.cardiac_data.has_files) {
+          console.log('Cardiac data files detected:', data.cardiac_data.files_by_subject);
+          setSubjectsWithCardiac(data.cardiac_data.subjects_with_cardiac);
+          setHasCardiacData(true);
+          
+          // Initialize cardiac configs
+          const initialCardiacConfigs = {};
+          data.cardiac_data.subjects_with_cardiac.forEach(subject => {
+            initialCardiacConfigs[subject] = {
+              selected: true,
+              analyzeHR: true,
+              analyzeHRV: true
+            };
+          });
+          setCardiacConfigs(initialCardiacConfigs);
+        } else {
+          setHasCardiacData(false);
+          setSubjectsWithCardiac([]);
+        }
+
         const eventMarkersMsg = data.event_markers && data.event_markers.length > 0 
           ? `, ${data.event_markers.length} event markers` 
           : '';
@@ -568,7 +673,7 @@ function AnalysisViewer() {
         : '';
         
         if (data.batch_mode && data.subjects && data.subjects.length > 1) {
-          const intersectionMsg = `📊 Showing ${data.metrics.length} common metrics, ${data.event_markers.length} common markers, ${data.conditions.length} common conditions across ${data.subjects.length} subjects`;
+          const intersectionMsg = `Showing ${data.metrics.length} common metrics, ${data.event_markers.length} common markers, ${data.conditions.length} common conditions across ${data.subjects.length} subjects`;
           setBatchStatusMessage(intersectionMsg);
         }
         setUploadStatus(`Found ${metrics.length} metrics${eventMarkersMsg}${conditionsMsg}${subjectsMsg}${externalMsg}`);
@@ -748,7 +853,9 @@ function AnalysisViewer() {
   };
 
   const nextWizardStep = () => {
-    const maxStep = hasExternalFiles ? 9 : 8;
+    let maxStep = 8; // Base steps
+    if (hasExternalFiles) maxStep++;
+    if (hasRespiratoryData) maxStep++;
     if (wizardStep < maxStep) {
       setWizardStep(wizardStep + 1);
     }
@@ -793,8 +900,19 @@ function AnalysisViewer() {
     }
 
     const selectedMetricsList = Object.keys(selectedMetrics).filter(m => selectedMetrics[m]);
-    if (selectedMetricsList.length === 0) {
-      setUploadStatus('Please select at least one biometric metric');
+    const hasRespiratorySelected = hasRespiratoryData && Object.values(respiratoryConfigs).some(c => c.selected);
+    const hasCardiacSelected = hasCardiacData && Object.values(cardiacConfigs).some(c => c.selected);
+    const hasExternalSelected = hasExternalFiles && selectedSubjectsList.some(subject => {
+      if (subjectsWithExternal.includes(subject) && externalConfigs[subject]) {
+        return Object.values(externalConfigs[subject]).some(config => config.selected !== false);
+      }
+      return false;
+    });
+
+    const hasAnyDataSelected = selectedMetricsList.length > 0 || hasRespiratorySelected || hasCardiacSelected || hasExternalSelected;
+
+    if (!hasAnyDataSelected) {
+      setUploadStatus('Please select at least one data type to analyze (EmotiBit metrics, respiratory, cardiac, or external data)');
       return;
     }
 
@@ -920,10 +1038,28 @@ function AnalysisViewer() {
     formData.append('cleaning_enabled', JSON.stringify(cleaningEnabled));
     formData.append('cleaning_stages', JSON.stringify(cleaningStages));
 
-    // 8. Add external data config
+    // 8a. Add external data config
     if (hasExternalFiles) {
       formData.append('external_configs', JSON.stringify(externalConfigs));
       formData.append('has_external_data', 'true');
+    }
+
+    // 8b. Add respiratory data config
+    if (hasRespiratoryData) {
+      formData.append('respiratory_configs', JSON.stringify(respiratoryConfigs));
+      formData.append('has_respiratory_data', 'true');
+      
+      const selectedCount = Object.values(respiratoryConfigs).filter(c => c.selected).length;
+      console.log(`Respiratory data: ${selectedCount} subjects selected`);
+    }
+
+    // 8c. Add cardiac data config
+    if (hasCardiacData) {
+      formData.append('cardiac_configs', JSON.stringify(cardiacConfigs));
+      formData.append('has_cardiac_data', 'true');
+      
+      const selectedCount = Object.values(cardiacConfigs).filter(c => c.selected).length;
+      console.log(`Cardiac data: ${selectedCount} subjects selected`);
     }
 
     // 9. Add batch mode parameters
@@ -1367,7 +1503,11 @@ function AnalysisViewer() {
             </div>
 
             <div className="wizard-breadcrumbs">
-            {['Type', 'Tags', 'Events', 'Conditions', 'Method', 'Plot', 'Cleaning', ...(hasExternalFiles ? ['External'] : []), 'Review', 'Run'].map((label, idx) => (
+              {['Type', 'Events', 'Conditions', 'Tags', 
+                ...(hasRespiratoryData ? ['Respiratory'] : []),
+                ...(hasCardiacData ? ['Cardiac'] : []),
+                ...(hasExternalFiles ? ['External'] : []),
+                'Settings', 'Review', 'Run'].map((label, idx) => (
                 <div
                   key={idx}
                   className={`breadcrumb ${wizardStep === idx ? 'active' : ''} ${wizardStep > idx ? 'completed' : ''}`}
@@ -1379,6 +1519,7 @@ function AnalysisViewer() {
             </div>
 
             <div className="wizard-content">
+              {/* STEP 0: Type & Subjects */}
               {wizardStep === 0 && (
                 <div className="wizard-section">
                   <h3 className="wizard-section-title">Analysis Type</h3>
@@ -1439,64 +1580,8 @@ function AnalysisViewer() {
                 </div>
               )}
 
+              {/* STEP 1: Event Markers */}
               {wizardStep === 1 && (
-                <div className="wizard-section">
-                  <h3 className="wizard-section-title">Biometric Tags</h3>
-                  <p className="wizard-section-description">
-                    Select the biometric metrics you want to analyze.
-                  </p>
-
-                  {getSelectedSubjectsCount() > 1 && (
-                    <div className="mode-toggle">
-                      <label className="toggle-option">
-                        <input
-                          type="radio"
-                          name="tagMode"
-                          value="union"
-                          checked={tagMode === 'union'}
-                          onChange={(e) => setTagMode(e.target.value)}
-                        />
-                        <span>Union (all tags across subjects)</span>
-                      </label>
-                      <label className="toggle-option">
-                        <input
-                          type="radio"
-                          name="tagMode"
-                          value="intersection"
-                          checked={tagMode === 'intersection'}
-                          onChange={(e) => setTagMode(e.target.value)}
-                        />
-                        <span>Intersection (common tags only)</span>
-                      </label>
-                    </div>
-                  )}
-
-                  <div className="tag-grid">
-                    {availableMetrics.length === 0 ? (
-                      <div className="no-metrics-message">
-                        No biometric metrics detected. Please ensure your folder contains EmotiBit data files.
-                      </div>
-                    ) : (
-                      availableMetrics.map(metric => (
-                        <label key={metric} className="tag-checkbox">
-                          <input
-                            type="checkbox"
-                            checked={selectedMetrics[metric] || false}
-                            onChange={() => handleMetricToggle(metric)}
-                          />
-                          <span>{metric}</span>
-                        </label>
-                      ))
-                    )}
-                  </div>
-                  
-                  <div className="selection-summary">
-                    {Object.values(selectedMetrics).filter(Boolean).length} tags selected
-                  </div>
-                </div>
-              )}
-
-              {wizardStep === 2 && (
                 <div className="wizard-section">
                   <h3 className="wizard-section-title">Event Markers</h3>
                   <p className="wizard-section-description">
@@ -1561,7 +1646,8 @@ function AnalysisViewer() {
                 </div>
               )}
 
-              {wizardStep === 3 && (
+              {/* STEP 2: Condition Markers */}
+              {wizardStep === 2 && (
                 <div className="wizard-section">
                   <h3 className="wizard-section-title">Condition Markers</h3>
                   <p className="wizard-section-description">
@@ -1615,320 +1701,258 @@ function AnalysisViewer() {
                 </div>
               )}
 
-              {wizardStep === 4 && (
+              {/* STEP 3: Biometric Tags */}
+              {wizardStep === 3 && (
                 <div className="wizard-section">
-                  <h3 className="wizard-section-title">Analysis Method</h3>
+                  <h3 className="wizard-section-title">Biometric Tags</h3>
                   <p className="wizard-section-description">
-                    Choose the statistical method for your analysis.
+                    Select the biometric metrics you want to analyze.
                   </p>
 
-                  <div className="method-grid">
-                    <label className="method-option">
-                      <input
-                        type="radio"
-                        name="analysisMethod"
-                        value="raw"
-                        checked={selectedAnalysisMethod === 'raw'}
-                        onChange={(e) => setSelectedAnalysisMethod(e.target.value)}
-                      />
-                      <div className="method-content">
-                        <strong>Raw Data</strong>
-                        <span>Direct signal values</span>
-                      </div>
-                    </label>
-
-                    <label className="method-option">
-                      <input
-                        type="radio"
-                        name="analysisMethod"
-                        value="mean"
-                        checked={selectedAnalysisMethod === 'mean'}
-                        onChange={(e) => setSelectedAnalysisMethod(e.target.value)}
-                      />
-                      <div className="method-content">
-                        <strong>Mean</strong>
-                        <span>Average value</span>
-                      </div>
-                    </label>
-
-                    <label className="method-option">
-                      <input
-                        type="radio"
-                        name="analysisMethod"
-                        value="moving_average"
-                        checked={selectedAnalysisMethod === 'moving_average'}
-                        onChange={(e) => setSelectedAnalysisMethod(e.target.value)}
-                      />
-                      <div className="method-content">
-                        <strong>Moving Average</strong>
-                        <span>Smoothed signal</span>
-                      </div>
-                    </label>
-
-                    <label className="method-option">
-                      <input
-                        type="radio"
-                        name="analysisMethod"
-                        value="rmssd"
-                        checked={selectedAnalysisMethod === 'rmssd'}
-                        onChange={(e) => setSelectedAnalysisMethod(e.target.value)}
-                      />
-                      <div className="method-content">
-                        <strong>RMSSD</strong>
-                        <span>Root mean square of successive differences</span>
-                      </div>
-                    </label>
-                  </div>
-                </div>
-              )}
-
-              {wizardStep === 5 && (
-                <div className="wizard-section">
-                  <h3 className="wizard-section-title">Plot Type</h3>
-                  <p className="wizard-section-description">
-                    Select how you want to visualize your data.
-                  </p>
-                  {Object.keys(selectedMetrics).some(m => m === 'HRV' && selectedMetrics[m]) && (
-                    <div className="hrv-notice-box" style={{
-                      padding: '12px',
-                      backgroundColor: '#e3f2fd',
-                      border: '1px solid #2196F3',
-                      borderRadius: '4px',
-                      marginBottom: '15px',
-                      fontSize: '14px'
-                    }}>
-                      <strong>Note:</strong> HRV uses specialized analysis and generates 4 dedicated plots 
-                      (PPG Signal, Time Domain, Frequency Domain, Non-linear) regardless of the plot type selected here. 
-                      The plot type selection applies to other selected metrics.
+                  {getSelectedSubjectsCount() > 1 && (
+                    <div className="mode-toggle">
+                      <label className="toggle-option">
+                        <input
+                          type="radio"
+                          name="tagMode"
+                          value="union"
+                          checked={tagMode === 'union'}
+                          onChange={(e) => setTagMode(e.target.value)}
+                        />
+                        <span>Union (all tags across subjects)</span>
+                      </label>
+                      <label className="toggle-option">
+                        <input
+                          type="radio"
+                          name="tagMode"
+                          value="intersection"
+                          checked={tagMode === 'intersection'}
+                          onChange={(e) => setTagMode(e.target.value)}
+                        />
+                        <span>Intersection (common tags only)</span>
+                      </label>
                     </div>
                   )}
 
-                  <div className="plot-grid">
-                    <label className={`plot-option ${selectedAnalysisMethod === 'mean' ? 'disabled' : ''}`}>
+                  <div className="tag-grid">
+                    {availableMetrics.length === 0 ? (
+                      <div className="no-metrics-message">
+                        No biometric metrics detected. Please ensure your folder contains EmotiBit data files.
+                      </div>
+                    ) : (
+                      availableMetrics.map(metric => (
+                        <label key={metric} className="tag-checkbox">
                           <input
-                            type="radio"
-                            name="plotType"
-                            value="lineplot"
-                            checked={selectedPlotType === 'lineplot'}
-                            onChange={(e) => setSelectedPlotType(e.target.value)}
-                            disabled={selectedAnalysisMethod === 'mean'}
+                            type="checkbox"
+                            checked={selectedMetrics[metric] || false}
+                            onChange={() => handleMetricToggle(metric)}
                           />
-                          <div className="plot-content">
-                            <strong>Line Plot</strong>
-                            <span>Time series visualization</span>
-                            {selectedAnalysisMethod === 'mean' && (
-                              <span className="incompatible-note">Requires time-series data</span>
-                            )}
-                            {selectedAnalysisMethod === 'moving_average' && (
-                              <span className="recommended-note">✓ Recommended for Moving Average</span>
-                            )}
-                          </div>
+                          <span>{metric}</span>
                         </label>
-
-                    <label className={`plot-option ${selectedAnalysisMethod === 'mean' ? 'disabled' : ''}`}>
-                          <input
-                            type="radio"
-                            name="plotType"
-                            value="boxplot"
-                            checked={selectedPlotType === 'boxplot'}
-                            onChange={(e) => setSelectedPlotType(e.target.value)}
-                            disabled={selectedAnalysisMethod === 'mean'}
-                          />
-                          <div className="plot-content">
-                            <strong>Box Plot</strong>
-                            <span>Distribution summary</span>
-                            {selectedAnalysisMethod === 'mean' && (
-                              <span className="incompatible-note">Requires distribution data</span>
-                            )}
-                          </div>
-                        </label>
-
-                    <label className={`plot-option ${['rmssd', 'moving_average', 'mean'].includes(selectedAnalysisMethod) ? 'disabled' : ''}`}>
-                          <input
-                            type="radio"
-                            name="plotType"
-                            value="poincare"
-                            checked={selectedPlotType === 'poincare'}
-                            onChange={(e) => setSelectedPlotType(e.target.value)}
-                            disabled={['rmssd', 'moving_average', 'mean'].includes(selectedAnalysisMethod)}
-                          />
-                          <div className="plot-content">
-                            <strong>Poincaré Plot</strong>
-                            <span>HRV analysis</span>
-                            {selectedAnalysisMethod === 'rmssd' && (
-                              <span className="incompatible-note">Requires raw data</span>
-                            )}
-                            {selectedAnalysisMethod === 'moving_average' && (
-                              <span className="incompatible-note">Requires raw data</span>
-                            )}
-                            {selectedAnalysisMethod === 'mean' && (
-                              <span className="incompatible-note">Requires multiple data points</span>
-                            )}
-                          </div>
-                        </label>
-
-                    <label className={`plot-option ${selectedAnalysisMethod === 'mean' ? 'disabled' : ''}`}>
-                          <input
-                            type="radio"
-                            name="plotType"
-                            value="scatter"
-                            checked={selectedPlotType === 'scatter'}
-                            onChange={(e) => setSelectedPlotType(e.target.value)}
-                            disabled={selectedAnalysisMethod === 'mean'}
-                          />
-                          <div className="plot-content">
-                            <strong>Scatter Plot</strong>
-                            <span>Point distribution</span>
-                            {selectedAnalysisMethod === 'mean' && (
-                              <span className="incompatible-note">Requires multiple data points</span>
-                            )}
-                          </div>
-                        </label>
-
-                    <label className="plot-option">
-                          <input
-                            type="radio"
-                            name="plotType"
-                            value="barchart"
-                            checked={selectedPlotType === 'barchart'}
-                            onChange={(e) => setSelectedPlotType(e.target.value)}
-                          />
-                          <div className="plot-content">
-                            <strong>Bar Chart</strong>
-                            <span>Statistical comparison</span>
-                            {selectedAnalysisMethod === 'mean' && (
-                              <span className="recommended-note">✓ Recommended for Mean analysis</span>
-                            )}
-                          </div>
-                        </label>
+                      ))
+                    )}
                   </div>
                   
-                  {selectedAnalysisMethod === 'mean' && (
-                    <div className="compatibility-hint">
-                      💡 <strong>Tip:</strong> Mean analysis works best with the comparison bar chart (automatically generated)
-                    </div>
-                  )}
+                  <div className="selection-summary">
+                    {Object.values(selectedMetrics).filter(Boolean).length} tags selected
+                  </div>
                 </div>
               )}
 
-              {wizardStep === 6 && (
+              {/* STEP 4: Respiratory (conditional) */}
+              {hasRespiratoryData && wizardStep === 4 && (
                 <div className="wizard-section">
-                  <h3 className="wizard-section-title">Data Cleaning</h3>
+                  <h3 className="wizard-section-title">Respiratory Data Configuration</h3>
                   <p className="wizard-section-description">
-                    Configure automated data cleaning stages to remove artifacts and invalid values from biometric signals.
+                    Configure respiratory (Vernier) data analysis. Select which metrics to analyze for each subject.
                   </p>
 
-                  <div className="cleaning-enable-toggle">
-                    <label className="checkbox-label">
-                      <input
-                        type="checkbox"
-                        checked={cleaningEnabled}
-                        onChange={(e) => setCleaningEnabled(e.target.checked)}
-                      />
-                      <span className="toggle-text">Enable Data Cleaning</span>
-                    </label>
+                  {subjectsWithRespiratory.filter(subject => selectedSubjects[subject]).length === 0 ? (
+                    <div className="no-experiments-message">
+                      No respiratory data found for selected subjects.
+                    </div>
+                  ) : (
+                    <div className="respiratory-subjects-panel">
+                      {subjectsWithRespiratory.filter(subject => selectedSubjects[subject]).map(subject => (
+                        <div key={subject} className="respiratory-subject-card">
+                          <h4 className="subject-card-title">{subject}</h4>
+                          
+                          <div className="respiratory-metrics-selection">
+                            <label className="checkbox-label">
+                              <input
+                                type="checkbox"
+                                checked={respiratoryConfigs[subject]?.selected !== false}
+                                onChange={(e) => {
+                                  setRespiratoryConfigs(prev => ({
+                                    ...prev,
+                                    [subject]: {
+                                      ...prev[subject],
+                                      selected: e.target.checked
+                                    }
+                                  }));
+                                }}
+                              />
+                              <span>Include respiratory data for this subject</span>
+                            </label>
+
+                            {respiratoryConfigs[subject]?.selected !== false && (
+                              <div className="respiratory-metric-options">
+                                <label className="checkbox-label">
+                                  <input
+                                    type="checkbox"
+                                    checked={respiratoryConfigs[subject]?.analyzeRR !== false}
+                                    onChange={(e) => {
+                                      setRespiratoryConfigs(prev => ({
+                                        ...prev,
+                                        [subject]: {
+                                          ...prev[subject],
+                                          analyzeRR: e.target.checked
+                                        }
+                                      }));
+                                    }}
+                                  />
+                                  <span>Analyze RR (Respiratory Rate)</span>
+                                </label>
+
+                                <label className="checkbox-label">
+                                  <input
+                                    type="checkbox"
+                                    checked={respiratoryConfigs[subject]?.analyzeForce !== false}
+                                    onChange={(e) => {
+                                      setRespiratoryConfigs(prev => ({
+                                        ...prev,
+                                        [subject]: {
+                                          ...prev[subject],
+                                          analyzeForce: e.target.checked
+                                        }
+                                      }));
+                                    }}
+                                  />
+                                  <span>Analyze Force (Respiratory Effort)</span>
+                                </label>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="respiratory-info-box" style={{
+                    marginTop: '20px',
+                    padding: '12px',
+                    backgroundColor: '#e8f5e9',
+                    border: '1px solid #4caf50',
+                    borderRadius: '4px'
+                  }}>
+                    <strong>💡 Analysis Recommendations:</strong>
+                    <ul style={{ marginTop: '8px', marginBottom: '0', paddingLeft: '20px' }}>
+                      <li><strong>RR (Respiratory Rate):</strong> Best with Line Plot or Moving Average to visualize breathing patterns</li>
+                      <li><strong>Force (Respiratory Effort):</strong> Best with Line Plot to show effort changes over time</li>
+                      <li>Both metrics work well with Box Plot for condition comparisons</li>
+                    </ul>
                   </div>
-
-                  {cleaningEnabled && (
-                    <div className="cleaning-stages-panel">
-                      <h4 className="cleaning-subtitle">Select Cleaning Stages</h4>
-                      <p className="cleaning-hint">
-                        Choose which cleaning operations to apply. Hover over each option for details.
-                      </p>
-
-                      <div className="cleaning-stages-grid">
-                        <label className="cleaning-stage-item" title="Remove NaN, infinite values, and negative values (where applicable)">
-                          <input
-                            type="checkbox"
-                            checked={cleaningStages.remove_invalid}
-                            onChange={(e) => setCleaningStages({...cleaningStages, remove_invalid: e.target.checked})}
-                          />
-                          <div className="stage-content">
-                            <strong>Remove Invalid Values</strong>
-                            <span className="stage-description">NaN, infinity, negatives</span>
-                          </div>
-                          <span className="recommended-badge">Recommended</span>
-                        </label>
-
-                        <label className="cleaning-stage-item" title="Remove values outside physiologically valid ranges (e.g., HR: 30-220 bpm)">
-                          <input
-                            type="checkbox"
-                            checked={cleaningStages.remove_physiological_outliers}
-                            onChange={(e) => setCleaningStages({...cleaningStages, remove_physiological_outliers: e.target.checked})}
-                          />
-                          <div className="stage-content">
-                            <strong>Remove Physiological Outliers</strong>
-                            <span className="stage-description">Values outside valid ranges</span>
-                          </div>
-                          <span className="recommended-badge">Recommended</span>
-                        </label>
-
-                        <label className="cleaning-stage-item" title="Remove statistical outliers using modified z-score (>3.5 standard deviations)">
-                          <input
-                            type="checkbox"
-                            checked={cleaningStages.remove_statistical_outliers}
-                            onChange={(e) => setCleaningStages({...cleaningStages, remove_statistical_outliers: e.target.checked})}
-                          />
-                          <div className="stage-content">
-                            <strong>Remove Statistical Outliers</strong>
-                            <span className="stage-description">Beyond 3.5 std deviations</span>
-                          </div>
-                        </label>
-
-                        <label className="cleaning-stage-item" title="Remove artifacts with unrealistic rate of change (e.g., HR change >30 bpm/sec)">
-                          <input
-                            type="checkbox"
-                            checked={cleaningStages.remove_sudden_changes}
-                            onChange={(e) => setCleaningStages({...cleaningStages, remove_sudden_changes: e.target.checked})}
-                          />
-                          <div className="stage-content">
-                            <strong>Remove Sudden Changes</strong>
-                            <span className="stage-description">Unrealistic rate of change</span>
-                          </div>
-                          <span className="recommended-badge">Recommended</span>
-                        </label>
-
-                        <label className="cleaning-stage-item" title="Fill small gaps in data using linear interpolation">
-                          <input
-                            type="checkbox"
-                            checked={cleaningStages.interpolate}
-                            onChange={(e) => setCleaningStages({...cleaningStages, interpolate: e.target.checked})}
-                          />
-                          <div className="stage-content">
-                            <strong>Interpolate Missing Values</strong>
-                            <span className="stage-description">Fill small gaps linearly</span>
-                          </div>
-                          <span className="recommended-badge">Recommended</span>
-                        </label>
-
-                        <label className="cleaning-stage-item" title="Apply median filter to reduce high-frequency noise">
-                          <input
-                            type="checkbox"
-                            checked={cleaningStages.smooth}
-                            onChange={(e) => setCleaningStages({...cleaningStages, smooth: e.target.checked})}
-                          />
-                          <div className="stage-content">
-                            <strong>Apply Smoothing Filter</strong>
-                            <span className="stage-description">Median filter (window=5)</span>
-                          </div>
-                        </label>
-                      </div>
-
-                      <div className="cleaning-summary-box">
-                        <strong>Selected Stages:</strong> {Object.values(cleaningStages).filter(Boolean).length} of 6
-                      </div>
-                    </div>
-                  )}
-
-                  {!cleaningEnabled && (
-                    <div className="cleaning-disabled-notice">
-                      ℹ️ Data cleaning is disabled. Raw data will be used as-is.
-                    </div>
-                  )}
                 </div>
               )}
 
-              {hasExternalFiles && wizardStep === 7 && (
+              {/* STEP 5: Cardiac (conditional) */}
+              {hasCardiacData && wizardStep === (hasRespiratoryData ? 5 : 4) && (
+                <div className="wizard-section">
+                  <h3 className="wizard-section-title">Cardiac Data Configuration</h3>
+                  <p className="wizard-section-description">
+                    Configure cardiac (Polar H10) data analysis. Select which metrics to analyze for each subject.
+                  </p>
+
+                  {subjectsWithCardiac.filter(subject => selectedSubjects[subject]).length === 0 ? (
+                    <div className="no-experiments-message">
+                      No cardiac data found for selected subjects.
+                    </div>
+                  ) : (
+                    <div className="respiratory-subjects-panel">
+                      {subjectsWithCardiac.filter(subject => selectedSubjects[subject]).map(subject => (
+                        <div key={subject} className="respiratory-subject-card">
+                          <h4 className="subject-card-title">{subject}</h4>
+                          
+                          <div className="respiratory-metrics-selection">
+                            <label className="checkbox-label">
+                              <input
+                                type="checkbox"
+                                checked={cardiacConfigs[subject]?.selected !== false}
+                                onChange={(e) => {
+                                  setCardiacConfigs(prev => ({
+                                    ...prev,
+                                    [subject]: {
+                                      ...prev[subject],
+                                      selected: e.target.checked
+                                    }
+                                  }));
+                                }}
+                              />
+                              <span>Include cardiac data for this subject</span>
+                            </label>
+
+                            {cardiacConfigs[subject]?.selected !== false && (
+                              <div className="respiratory-metric-options">
+                                <label className="checkbox-label">
+                                  <input
+                                    type="checkbox"
+                                    checked={cardiacConfigs[subject]?.analyzeHR !== false}
+                                    onChange={(e) => {
+                                      setCardiacConfigs(prev => ({
+                                        ...prev,
+                                        [subject]: {
+                                          ...prev[subject],
+                                          analyzeHR: e.target.checked
+                                        }
+                                      }));
+                                    }}
+                                  />
+                                  <span>Analyze HR (Heart Rate)</span>
+                                </label>
+
+                                <label className="checkbox-label">
+                                  <input
+                                    type="checkbox"
+                                    checked={cardiacConfigs[subject]?.analyzeHRV !== false}
+                                    onChange={(e) => {
+                                      setCardiacConfigs(prev => ({
+                                        ...prev,
+                                        [subject]: {
+                                          ...prev[subject],
+                                          analyzeHRV: e.target.checked
+                                        }
+                                      }));
+                                    }}
+                                  />
+                                  <span>Analyze HRV (Heart Rate Variability)</span>
+                                </label>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="respiratory-info-box" style={{
+                    marginTop: '20px',
+                    padding: '12px',
+                    backgroundColor: '#e3f2fd',
+                    border: '1px solid #2196F3',
+                    borderRadius: '4px'
+                  }}>
+                    <strong>💡 Analysis Recommendations:</strong>
+                    <ul style={{ marginTop: '8px', marginBottom: '0', paddingLeft: '20px' }}>
+                      <li><strong>HR (Heart Rate):</strong> Best with Line Plot for continuous monitoring or Box Plot for comparison</li>
+                      <li><strong>HRV (Heart Rate Variability):</strong> Provides stress/recovery insights, best with Mean analysis</li>
+                      <li>Polar H10 provides high-accuracy ECG-based measurements</li>
+                    </ul>
+                  </div>
+                </div>
+              )}
+
+              {/* STEP 6/7: External Data (conditional) */}
+              {hasExternalFiles && wizardStep === (hasRespiratoryData && hasCardiacData ? 6 : hasRespiratoryData || hasCardiacData ? 5 : 4) && (
                 <ExternalConfigStep
                   externalFilesBySubject={externalFilesBySubject}
                   selectedSubjects={selectedSubjects}
@@ -1937,7 +1961,337 @@ function AnalysisViewer() {
                 />
               )}
 
-              {wizardStep === (hasExternalFiles ? 8 : 7) && (
+              {/* STEP 7/8: Analysis Settings (Method + Plot + Cleaning combined) */}
+              {wizardStep === (() => {
+                let step = 4;
+                if (hasRespiratoryData) step++;
+                if (hasCardiacData) step++;
+                if (hasExternalFiles) step++;
+                return step;
+              })() && (
+                <div className="wizard-section">
+                  <h3 className="wizard-section-title">Analysis Settings</h3>
+                  <p className="wizard-section-description">
+                    Configure how your data will be processed, visualized, and cleaned.
+                  </p>
+
+                  {/* Analysis Method */}
+                  <div className="settings-subsection">
+                    <h4 className="subsection-title">Analysis Method</h4>
+                    <p className="subsection-hint">Choose the statistical method for your analysis.</p>
+
+                    <div className="method-grid">
+                      <label className="method-option">
+                        <input
+                          type="radio"
+                          name="analysisMethod"
+                          value="raw"
+                          checked={selectedAnalysisMethod === 'raw'}
+                          onChange={(e) => setSelectedAnalysisMethod(e.target.value)}
+                        />
+                        <div className="method-content">
+                          <strong>Raw Data</strong>
+                          <span>Direct signal values</span>
+                        </div>
+                      </label>
+
+                      <label className="method-option">
+                        <input
+                          type="radio"
+                          name="analysisMethod"
+                          value="mean"
+                          checked={selectedAnalysisMethod === 'mean'}
+                          onChange={(e) => setSelectedAnalysisMethod(e.target.value)}
+                        />
+                        <div className="method-content">
+                          <strong>Mean</strong>
+                          <span>Average value</span>
+                        </div>
+                      </label>
+
+                      <label className="method-option">
+                        <input
+                          type="radio"
+                          name="analysisMethod"
+                          value="moving_average"
+                          checked={selectedAnalysisMethod === 'moving_average'}
+                          onChange={(e) => setSelectedAnalysisMethod(e.target.value)}
+                        />
+                        <div className="method-content">
+                          <strong>Moving Average</strong>
+                          <span>Smoothed signal</span>
+                        </div>
+                      </label>
+
+                      <label className="method-option">
+                        <input
+                          type="radio"
+                          name="analysisMethod"
+                          value="rmssd"
+                          checked={selectedAnalysisMethod === 'rmssd'}
+                          onChange={(e) => setSelectedAnalysisMethod(e.target.value)}
+                        />
+                        <div className="method-content">
+                          <strong>RMSSD</strong>
+                          <span>Root mean square of successive differences</span>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Plot Type */}
+                  <div className="settings-subsection" style={{ marginTop: '30px' }}>
+                    <h4 className="subsection-title">Visualization Type</h4>
+                    <p className="subsection-hint">Select how you want to visualize your data.</p>
+                    
+                    {Object.keys(selectedMetrics).some(m => m === 'HRV' && selectedMetrics[m]) && (
+                      <div className="hrv-notice-box" style={{
+                        padding: '12px',
+                        backgroundColor: '#e3f2fd',
+                        border: '1px solid #2196F3',
+                        borderRadius: '4px',
+                        marginBottom: '15px',
+                        fontSize: '14px'
+                      }}>
+                        <strong>Note:</strong> HRV uses specialized analysis and generates 4 dedicated plots 
+                        (PPG Signal, Time Domain, Frequency Domain, Non-linear) regardless of the plot type selected here. 
+                        The plot type selection applies to other selected metrics.
+                      </div>
+                    )}
+
+                    <div className="plot-grid">
+                      <label className={`plot-option ${selectedAnalysisMethod === 'mean' ? 'disabled' : ''}`}>
+                        <input
+                          type="radio"
+                          name="plotType"
+                          value="lineplot"
+                          checked={selectedPlotType === 'lineplot'}
+                          onChange={(e) => setSelectedPlotType(e.target.value)}
+                          disabled={selectedAnalysisMethod === 'mean'}
+                        />
+                        <div className="plot-content">
+                          <strong>Line Plot</strong>
+                          <span>Time series visualization</span>
+                          {selectedAnalysisMethod === 'mean' && (
+                            <span className="incompatible-note">Requires time-series data</span>
+                          )}
+                          {selectedAnalysisMethod === 'moving_average' && (
+                            <span className="recommended-note">✓ Recommended for Moving Average</span>
+                          )}
+                        </div>
+                      </label>
+
+                      <label className={`plot-option ${selectedAnalysisMethod === 'mean' ? 'disabled' : ''}`}>
+                        <input
+                          type="radio"
+                          name="plotType"
+                          value="boxplot"
+                          checked={selectedPlotType === 'boxplot'}
+                          onChange={(e) => setSelectedPlotType(e.target.value)}
+                          disabled={selectedAnalysisMethod === 'mean'}
+                        />
+                        <div className="plot-content">
+                          <strong>Box Plot</strong>
+                          <span>Distribution summary</span>
+                          {selectedAnalysisMethod === 'mean' && (
+                            <span className="incompatible-note">Requires distribution data</span>
+                          )}
+                        </div>
+                      </label>
+
+                      <label className={`plot-option ${['rmssd', 'moving_average', 'mean'].includes(selectedAnalysisMethod) ? 'disabled' : ''}`}>
+                        <input
+                          type="radio"
+                          name="plotType"
+                          value="poincare"
+                          checked={selectedPlotType === 'poincare'}
+                          onChange={(e) => setSelectedPlotType(e.target.value)}
+                          disabled={['rmssd', 'moving_average', 'mean'].includes(selectedAnalysisMethod)}
+                        />
+                        <div className="plot-content">
+                          <strong>Poincaré Plot</strong>
+                          <span>HRV analysis</span>
+                          {selectedAnalysisMethod === 'rmssd' && (
+                            <span className="incompatible-note">Requires raw data</span>
+                          )}
+                          {selectedAnalysisMethod === 'moving_average' && (
+                            <span className="incompatible-note">Requires raw data</span>
+                          )}
+                          {selectedAnalysisMethod === 'mean' && (
+                            <span className="incompatible-note">Requires multiple data points</span>
+                          )}
+                        </div>
+                      </label>
+
+                      <label className={`plot-option ${selectedAnalysisMethod === 'mean' ? 'disabled' : ''}`}>
+                        <input
+                          type="radio"
+                          name="plotType"
+                          value="scatter"
+                          checked={selectedPlotType === 'scatter'}
+                          onChange={(e) => setSelectedPlotType(e.target.value)}
+                          disabled={selectedAnalysisMethod === 'mean'}
+                        />
+                        <div className="plot-content">
+                          <strong>Scatter Plot</strong>
+                          <span>Point distribution</span>
+                          {selectedAnalysisMethod === 'mean' && (
+                            <span className="incompatible-note">Requires multiple data points</span>
+                          )}
+                        </div>
+                      </label>
+
+                      <label className="plot-option">
+                        <input
+                          type="radio"
+                          name="plotType"
+                          value="barchart"
+                          checked={selectedPlotType === 'barchart'}
+                          onChange={(e) => setSelectedPlotType(e.target.value)}
+                        />
+                        <div className="plot-content">
+                          <strong>Bar Chart</strong>
+                          <span>Statistical comparison</span>
+                          {selectedAnalysisMethod === 'mean' && (
+                            <span className="recommended-note">✓ Recommended for Mean analysis</span>
+                          )}
+                        </div>
+                      </label>
+                    </div>
+                    
+                    {selectedAnalysisMethod === 'mean' && (
+                      <div className="compatibility-hint">
+                        💡 <strong>Tip:</strong> Mean analysis works best with the comparison bar chart (automatically generated)
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Data Cleaning */}
+                  <div className="settings-subsection" style={{ marginTop: '30px' }}>
+                    <h4 className="subsection-title">Data Cleaning</h4>
+                    <p className="subsection-hint">
+                      Configure automated data cleaning stages to remove artifacts and invalid values from biometric signals.
+                    </p>
+
+                    <div className="cleaning-enable-toggle">
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={cleaningEnabled}
+                          onChange={(e) => setCleaningEnabled(e.target.checked)}
+                        />
+                        <span className="toggle-text">Enable Data Cleaning</span>
+                      </label>
+                    </div>
+
+                    {cleaningEnabled && (
+                      <div className="cleaning-stages-panel">
+                        <h5 className="cleaning-subtitle">Select Cleaning Stages</h5>
+                        <p className="cleaning-hint">
+                          Choose which cleaning operations to apply. Hover over each option for details.
+                        </p>
+
+                        <div className="cleaning-stages-grid">
+                          <label className="cleaning-stage-item" title="Remove NaN, infinite values, and negative values (where applicable)">
+                            <input
+                              type="checkbox"
+                              checked={cleaningStages.remove_invalid}
+                              onChange={(e) => setCleaningStages({...cleaningStages, remove_invalid: e.target.checked})}
+                            />
+                            <div className="stage-content">
+                              <strong>Remove Invalid Values</strong>
+                              <span className="stage-description">NaN, infinity, negatives</span>
+                            </div>
+                            <span className="recommended-badge">Recommended</span>
+                          </label>
+
+                          <label className="cleaning-stage-item" title="Remove values outside physiologically valid ranges (e.g., HR: 30-220 bpm)">
+                            <input
+                              type="checkbox"
+                              checked={cleaningStages.remove_physiological_outliers}
+                              onChange={(e) => setCleaningStages({...cleaningStages, remove_physiological_outliers: e.target.checked})}
+                            />
+                            <div className="stage-content">
+                              <strong>Remove Physiological Outliers</strong>
+                              <span className="stage-description">Values outside valid ranges</span>
+                            </div>
+                            <span className="recommended-badge">Recommended</span>
+                          </label>
+
+                          <label className="cleaning-stage-item" title="Remove statistical outliers using modified z-score (>3.5 standard deviations)">
+                            <input
+                              type="checkbox"
+                              checked={cleaningStages.remove_statistical_outliers}
+                              onChange={(e) => setCleaningStages({...cleaningStages, remove_statistical_outliers: e.target.checked})}
+                            />
+                            <div className="stage-content">
+                              <strong>Remove Statistical Outliers</strong>
+                              <span className="stage-description">Beyond 3.5 std deviations</span>
+                            </div>
+                          </label>
+
+                          <label className="cleaning-stage-item" title="Remove artifacts with unrealistic rate of change (e.g., HR change >30 bpm/sec)">
+                            <input
+                              type="checkbox"
+                              checked={cleaningStages.remove_sudden_changes}
+                              onChange={(e) => setCleaningStages({...cleaningStages, remove_sudden_changes: e.target.checked})}
+                            />
+                            <div className="stage-content">
+                              <strong>Remove Sudden Changes</strong>
+                              <span className="stage-description">Unrealistic rate of change</span>
+                            </div>
+                            <span className="recommended-badge">Recommended</span>
+                          </label>
+
+                          <label className="cleaning-stage-item" title="Fill small gaps in data using linear interpolation">
+                            <input
+                              type="checkbox"
+                              checked={cleaningStages.interpolate}
+                              onChange={(e) => setCleaningStages({...cleaningStages, interpolate: e.target.checked})}
+                            />
+                            <div className="stage-content">
+                              <strong>Interpolate Missing Values</strong>
+                              <span className="stage-description">Fill small gaps linearly</span>
+                            </div>
+                            <span className="recommended-badge">Recommended</span>
+                          </label>
+
+                          <label className="cleaning-stage-item" title="Apply median filter to reduce high-frequency noise">
+                            <input
+                              type="checkbox"
+                              checked={cleaningStages.smooth}
+                              onChange={(e) => setCleaningStages({...cleaningStages, smooth: e.target.checked})}
+                            />
+                            <div className="stage-content">
+                              <strong>Apply Smoothing Filter</strong>
+                              <span className="stage-description">Median filter (window=5)</span>
+                            </div>
+                          </label>
+                        </div>
+
+                        <div className="cleaning-summary-box">
+                          <strong>Selected Stages:</strong> {Object.values(cleaningStages).filter(Boolean).length} of 6
+                        </div>
+                      </div>
+                    )}
+
+                    {!cleaningEnabled && (
+                      <div className="cleaning-disabled-notice">
+                        ℹ️ Data cleaning is disabled. Raw data will be used as-is.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* STEP 8/9: Review */}
+              {wizardStep === (() => {
+                let step = 5;
+                if (hasRespiratoryData) step++;
+                if (hasCardiacData) step++;
+                if (hasExternalFiles) step++;
+                return step;
+              })() && (
                 <div className="wizard-section">
                   <h3 className="wizard-section-title">Configuration Review</h3>
                   <p className="wizard-section-description">
@@ -1952,22 +2306,59 @@ function AnalysisViewer() {
                       <strong>Subjects:</strong> {getSelectedSubjectsCount()} selected
                     </div>
                     <div className="summary-item">
-                      <strong>Biometric Tags:</strong> {Object.values(selectedMetrics).filter(Boolean).length} selected
-                    </div>
-                    <div className="summary-item">
                       <strong>Event Windows:</strong> {selectedEvents.filter(e => e.event).length} configured
                     </div>
                     <div className="summary-item">
-                      <strong>Analysis Method:</strong> {selectedAnalysisMethod}
+                      <strong>Biometric Tags:</strong> {Object.values(selectedMetrics).filter(Boolean).length} selected
                     </div>
-                    <div className="summary-item">
-                      <strong>Plot Type:</strong> {selectedPlotType}
-                    </div>
-                    <div className="summary-item">
-                      <strong>Data Cleaning:</strong> {cleaningEnabled ? 
-                        `Enabled (${Object.values(cleaningStages).filter(Boolean).length} stages)` : 
-                        'Disabled'}
-                    </div>
+                    {hasRespiratoryData && (
+                      <div className="summary-item">
+                        <strong>Respiratory Data:</strong> {(() => {
+                          const selectedSubjectsWithResp = Object.keys(selectedSubjects)
+                            .filter(s => selectedSubjects[s] && subjectsWithRespiratory.includes(s));
+                          
+                          const enabledCount = selectedSubjectsWithResp.filter(
+                            s => respiratoryConfigs[s]?.selected !== false
+                          ).length;
+                          
+                          const metricsInfo = selectedSubjectsWithResp
+                            .filter(s => respiratoryConfigs[s]?.selected !== false)
+                            .map(s => {
+                              const metrics = [];
+                              if (respiratoryConfigs[s]?.analyzeRR !== false) metrics.push('RR');
+                              if (respiratoryConfigs[s]?.analyzeForce !== false) metrics.push('Force');
+                              return metrics.length;
+                            })
+                            .reduce((a, b) => a + b, 0);
+                          
+                          return `${enabledCount} subject(s), ${metricsInfo} metric(s)`;
+                        })()}
+                      </div>
+                    )}
+                    {hasCardiacData && (
+                      <div className="summary-item">
+                        <strong>Cardiac Data:</strong> {(() => {
+                          const selectedSubjectsWithCardiac = Object.keys(selectedSubjects)
+                            .filter(s => selectedSubjects[s] && subjectsWithCardiac.includes(s));
+                          
+                          const enabledCount = selectedSubjectsWithCardiac.filter(
+                            s => cardiacConfigs[s]?.selected !== false
+                          ).length;
+                          
+                          const metricsInfo = selectedSubjectsWithCardiac
+                            .filter(s => cardiacConfigs[s]?.selected !== false)
+                            .map(s => {
+                              const metrics = [];
+                              if (cardiacConfigs[s]?.analyzeHR !== false) metrics.push('HR');
+                              if (cardiacConfigs[s]?.analyzeHRV !== false) metrics.push('HRV');
+                              return metrics.length;
+                            })
+                            .reduce((a, b) => a + b, 0);
+                          
+                          return `${enabledCount} subject(s), ${metricsInfo} metric(s)`;
+                        })()}
+                      </div>
+                    )}
                     {hasExternalFiles && (
                       <div className="summary-item">
                         <strong>External Data Files:</strong> {(() => {
@@ -1989,8 +2380,19 @@ function AnalysisViewer() {
                         })()}
                       </div>
                     )}
+                    <div className="summary-item">
+                      <strong>Analysis Method:</strong> {selectedAnalysisMethod}
+                    </div>
+                    <div className="summary-item">
+                      <strong>Plot Type:</strong> {selectedPlotType}
+                    </div>
+                    <div className="summary-item">
+                      <strong>Data Cleaning:</strong> {cleaningEnabled ? 
+                        `Enabled (${Object.values(cleaningStages).filter(Boolean).length} stages)` : 
+                        'Disabled'}
+                    </div>
                   </div>
-
+                  
                   {configIssues.length > 0 && (
                     <div className="config-issues">
                       <h4 className="issues-title">⚠️ Configuration Issues:</h4>
@@ -2010,7 +2412,14 @@ function AnalysisViewer() {
                 </div>
               )}
 
-              {wizardStep === (hasExternalFiles ? 9 : 8) && (
+              {/* STEP 9/10: Run */}
+              {wizardStep === (() => {
+                let step = 6;
+                if (hasRespiratoryData) step++;
+                if (hasCardiacData) step++;
+                if (hasExternalFiles) step++;
+                return step;
+              })() && (
                 <div className="wizard-section wizard-final">
                   <p className="wizard-section-description">
                     Click the button below to start processing your data. This may take a few moments.
@@ -2043,12 +2452,24 @@ function AnalysisViewer() {
               </button>
 
               <div className="wizard-progress">
-                Step {wizardStep + 1} of {hasExternalFiles ? 10 : 9}
+                Step {wizardStep + 1} of {(() => {
+                  let total = 6; // Base: Type, Events, Conditions, Tags, Settings, Review, Run = 7 but 0-indexed so 6
+                  if (hasRespiratoryData) total++;
+                  if (hasCardiacData) total++;
+                  if (hasExternalFiles) total++;
+                  return total + 1; // +1 because we're showing "Step X of Y" not 0-indexed
+                })()}
               </div>
 
               <button
                 onClick={nextWizardStep}
-                disabled={wizardStep === (hasExternalFiles ? 9 : 8)}
+                disabled={wizardStep === (() => {
+                  let max = 6;
+                  if (hasRespiratoryData) max++;
+                  if (hasCardiacData) max++;
+                  if (hasExternalFiles) max++;
+                  return max;
+                })()}
                 className="wizard-nav-btn next"
               >
                 Next →
