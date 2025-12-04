@@ -1243,7 +1243,7 @@ function AnalysisViewer() {
     {
       title: "Browse for Subject Data",
       description: "Click the 'Browse For Subject Data' button to select your experiment folder.",
-      details: "The folder should contain subject subfolders with emotibit_data, event markers, and other experimental files. The system will automatically detect all available subjects and data files."
+      details: "The folder should contain subject subfolders with emotibit_data, event markers, and other experimental files. All available subject folders and data files will be detected automatically."
     },
     {
       title: "Review Detected Files",
@@ -1256,24 +1256,55 @@ function AnalysisViewer() {
       details: "The wizard will guide you through 8 steps to set up your analysis. You can navigate using the Next/Previous buttons or click the breadcrumbs at the top to jump between steps."
     },
     {
-      title: "Select Analysis Type & Subjects",
-      description: "Choose between inter-subject (single) or intra-subject (multi) analysis, then select which subjects to include.",
-      details: "Inter-subject analyzes one subject's data. Intra-subject compares data across multiple subjects. Check the boxes next to the subjects you want to analyze."
+      title: "Choose Respiratory Data",
+      description: "Select respiratory data collected via the Vernier belt.",
+      details: "Data collected by the Vernier Belt include Force and Respiratory Rate values."
+    },
+    {
+      title: "Choose Cardiac Data (Polar H10)",
+      description: "Select cardiac data collected by the Polar H10 Belt.",
+      details: "Data collectedd by the Polar H10 Belt include HR and HRV."
+    }, 
+    {
+      title: "Select Event Marker",
+      description: "Filter analysis window by experimental events. You can add multiple event windows for comparison.",
+      details: "Click '+ Add Event Window' to compare multiple events or time periods. Select 'All (entire experiment)' to analyze the full recording. The Union/Intersection toggle works the same as for tags."
+    },
+    {
+      title: "Select Condition Marker",
+      description: "Filter analysis window by experimental condition. You can add multiple condition windows for comparison.",
+      details: "Click '+ Add Condition Window' to compare multiple events or time periods. Select 'All (entire experiment)' to analyze the full recording. The Union/Intersection toggle works the same as for tags."
     },
     {
       title: "Choose Biometric Tags",
       description: "Select which physiological metrics you want to analyze (HR, EDA, TEMP, etc.).",
-      details: "If multiple subjects are selected, use the Union/Intersection toggle to show either all tags across subjects (Union) or only tags common to all subjects (Intersection). HRV will appear automatically if PPG files are detected."
+      details: "If multiple subjects are selected, use the Union/Intersection toggle to show either all tags across subjects (Union) or only tags common to all subjects (Intersection). HRV will appear automatically if PPG files are detected. Note that selecting the HRV tag will produce HRV tags derived from the PPG data. If cardiac (Polar H10) data is selected, HRV calculated directly on the Polar H10 device will available."
     },
     {
-      title: "Select Event Markers",
-      description: "Choose which experimental events to analyze. You can add multiple event windows for comparison.",
-      details: "Click '+ Add Event Window' to compare multiple events or time periods. Select 'All (entire experiment)' to analyze the full recording. The Union/Intersection toggle works the same as for tags."
+      title: "Choose Respiratory Data",
+      description: "Select respiratory data collected via the Vernier belt.",
+      details: "Data collected by the Vernier Belt include Force and Respiratory Rate values."
     },
     {
-      title: "Configure Conditions & Methods",
-      description: "Filter by experimental conditions, choose your analysis method, and select visualization type.",
-      details: "Set conditions for each event window (or select 'All conditions'). Choose an analysis method (Raw Data, Mean, Moving Average, etc.) and plot type (Line Plot, Box Plot, etc.)."
+      title: "Choose Cardiac Data (Polar H10)",
+      description: "Select cardiac data collected by the Polar H10 Belt.",
+      details: "Data collectedd by the Polar H10 Belt include HR and HRV."
+    }, 
+    {
+      title: "Choose External Data",
+      description: "Select external data files (e.g., data from other software platforms) to include in the analysis.",
+      details: "For each external data file, select the timestamp column, data columns to analyze, and any event/condition markers present in the data. You can customize how each data column is displayed (name, type, units)."
+    },
+    {
+      title: "Select Analysis Type & Subjects",
+      description: "Choose between inter-subject (single) or intra-subject (multi) analysis, then select which subjects to include.",
+      details: "Inter-subject analyzes one subject's data. Intra-subject compares data across multiple subjects. Check the boxes next to the subjects you want to analyze."
+    },
+    
+{
+      title: "Configure Methods",
+      description: "Choose your analysis method, and select visualization type.",
+      details: "Set conditions for each event window (or select 'All conditions'). Choose an analysis method (Raw Data, Mean, Moving Average, etc.) and plot type (Line Plot, Box Plot, etc.). Note that certain plot types will be filtered out by selecting certain methods"
     },
     {
       title: "Review & Run Analysis",
