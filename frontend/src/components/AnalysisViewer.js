@@ -3,6 +3,25 @@ import './AnalysisViewer.css';
 import ExternalConfigStep from './ExternalConfigStep';
 import './ExternalConfigStep.css';
 
+const DATA_SOURCE_CAPABILITIES = {
+  'emotibit': {
+    compatible_methods: ['raw', 'mean', 'moving_average', 'rmssd'],
+    compatible_plots: ['lineplot', 'boxplot', 'scatter', 'poincare', 'barchart']
+  },
+  'respiratory': {
+    compatible_methods: ['raw', 'mean', 'moving_average'],
+    compatible_plots: ['lineplot', 'boxplot', 'barchart']
+  },
+  'cardiac': {
+    compatible_methods: ['raw', 'mean', 'moving_average'],
+    compatible_plots: ['lineplot', 'boxplot', 'barchart']
+  },
+  'external': {
+    compatible_methods: ['raw', 'mean', 'moving_average'],
+    compatible_plots: ['lineplot', 'boxplot', 'barchart']
+  }
+};
+
 function AnalysisViewer() {
   const [selectedFolder, setSelectedFolder] = useState(null);
   const [fileStructure, setFileStructure] = useState(null);
@@ -71,6 +90,75 @@ function AnalysisViewer() {
     interpolate: true,
     smooth: false
   });
+
+  // Calculate compatible analysis methods and plot types based on selected data sources
+  const getCompatibleOptions = React.useCallback(() => {
+    const selectedSources = [];
+    
+    // Check EmotiBit metrics
+    const hasEmotiBitSelected = Object.values(selectedMetrics).some(v => v);
+    if (hasEmotiBitSelected) {
+      selectedSources.push('emotibit');
+    }
+    
+    // Check Respiratory data
+    if (hasRespiratoryData) {
+      const hasRespiratorySelected = Object.values(respiratoryConfigs).some(c => c.selected);
+      if (hasRespiratorySelected) {
+        selectedSources.push('respiratory');
+      }
+    }
+    
+    // Check Cardiac data
+    if (hasCardiacData) {
+      const hasCardiacSelected = Object.values(cardiacConfigs).some(c => c.selected);
+      if (hasCardiacSelected) {
+        selectedSources.push('cardiac');
+      }
+    }
+    
+    // Check External data
+    if (hasExternalFiles) {
+      const selectedSubjectsList = Object.keys(selectedSubjects).filter(s => selectedSubjects[s]);
+      const hasExternalSelected = selectedSubjectsList.some(subject => {
+        if (subjectsWithExternal.includes(subject) && externalConfigs[subject]) {
+          return Object.values(externalConfigs[subject]).some(config => config.selected !== false);
+        }
+        return false;
+      });
+      if (hasExternalSelected) {
+        selectedSources.push('external');
+      }
+    }
+    
+    // If nothing selected, return all options
+    if (selectedSources.length === 0) {
+      return {
+        compatibleMethods: ['raw', 'mean', 'moving_average', 'rmssd'],
+        compatiblePlots: ['lineplot', 'boxplot', 'scatter', 'poincare', 'barchart'],
+        selectedSources: []
+      };
+    }
+    
+    // Find intersection of compatible options
+    const allMethods = ['raw', 'mean', 'moving_average', 'rmssd'];
+    const allPlots = ['lineplot', 'boxplot', 'scatter', 'poincare', 'barchart'];
+    
+    const compatibleMethods = allMethods.filter(method =>
+      selectedSources.every(source =>
+        DATA_SOURCE_CAPABILITIES[source].compatible_methods.includes(method)
+      )
+    );
+    
+    const compatiblePlots = allPlots.filter(plot =>
+      selectedSources.every(source =>
+        DATA_SOURCE_CAPABILITIES[source].compatible_plots.includes(plot)
+      )
+    );
+    
+    return { compatibleMethods, compatiblePlots, selectedSources };
+  }, [selectedMetrics, hasRespiratoryData, respiratoryConfigs, hasCardiacData, 
+      cardiacConfigs, hasExternalFiles, selectedSubjects, subjectsWithExternal, externalConfigs]);
 
   const validateConfiguration = React.useCallback(() => {
     const issues = [];
@@ -247,6 +335,29 @@ function AnalysisViewer() {
       }
     }
   }, [selectedAnalysisMethod, selectedPlotType, setUploadStatus]);
+
+  // Auto-correct selections when compatible options change
+  useEffect(() => {
+    const { compatibleMethods, compatiblePlots } = getCompatibleOptions();
+    
+    // Auto-correct analysis method if current selection is incompatible
+    if (!compatibleMethods.includes(selectedAnalysisMethod)) {
+      const newMethod = compatibleMethods[0] || 'raw';
+      console.log(`Auto-correcting analysis method: ${selectedAnalysisMethod} → ${newMethod}`);
+      setSelectedAnalysisMethod(newMethod);
+      setUploadStatus(`Analysis method auto-corrected to ${newMethod} (compatible with selected data sources)`);
+    }
+    
+    // Auto-correct plot type if current selection is incompatible
+    if (!compatiblePlots.includes(selectedPlotType)) {
+      const newPlot = compatiblePlots[0] || 'lineplot';
+      console.log(`Auto-correcting plot type: ${selectedPlotType} → ${newPlot}`);
+      setSelectedPlotType(newPlot);
+      setUploadStatus(`Plot type auto-corrected to ${newPlot} (compatible with selected data sources)`);
+    }
+  }, [selectedMetrics, hasRespiratoryData, respiratoryConfigs, hasCardiacData, 
+      cardiacConfigs, hasExternalFiles, selectedSubjects, subjectsWithExternal, 
+      externalConfigs, getCompatibleOptions, selectedAnalysisMethod, selectedPlotType]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -1980,63 +2091,101 @@ function AnalysisViewer() {
                     <h4 className="subsection-title">Analysis Method</h4>
                     <p className="subsection-hint">Choose the statistical method for your analysis.</p>
 
-                    <div className="method-grid">
-                      <label className="method-option">
-                        <input
-                          type="radio"
-                          name="analysisMethod"
-                          value="raw"
-                          checked={selectedAnalysisMethod === 'raw'}
-                          onChange={(e) => setSelectedAnalysisMethod(e.target.value)}
-                        />
-                        <div className="method-content">
-                          <strong>Raw Data</strong>
-                          <span>Direct signal values</span>
-                        </div>
-                      </label>
+                    {(() => {
+                      const { compatibleMethods, selectedSources } = getCompatibleOptions();
+                      
+                      return (
+                        <>
+                          {selectedSources.length > 1 && (
+                            <div className="compatibility-notice" style={{
+                              padding: '10px',
+                              backgroundColor: '#e3f2fd',
+                              border: '1px solid #2196F3',
+                              borderRadius: '4px',
+                              marginBottom: '15px',
+                              fontSize: '13px'
+                            }}>
+                              ℹ️ Analyzing {selectedSources.length} data source types together. 
+                              Showing methods compatible with: {selectedSources.join(', ')}
+                            </div>
+                          )}
 
-                      <label className="method-option">
-                        <input
-                          type="radio"
-                          name="analysisMethod"
-                          value="mean"
-                          checked={selectedAnalysisMethod === 'mean'}
-                          onChange={(e) => setSelectedAnalysisMethod(e.target.value)}
-                        />
-                        <div className="method-content">
-                          <strong>Mean</strong>
-                          <span>Average value</span>
-                        </div>
-                      </label>
+                          <div className="method-grid">
+                            <label className={`method-option ${!compatibleMethods.includes('raw') ? 'disabled' : ''}`}>
+                              <input
+                                type="radio"
+                                name="analysisMethod"
+                                value="raw"
+                                checked={selectedAnalysisMethod === 'raw'}
+                                onChange={(e) => setSelectedAnalysisMethod(e.target.value)}
+                                disabled={!compatibleMethods.includes('raw')}
+                              />
+                              <div className="method-content">
+                                <strong>Raw Data</strong>
+                                <span>Direct signal values</span>
+                                {!compatibleMethods.includes('raw') && (
+                                  <span className="incompatible-note">Not compatible</span>
+                                )}
+                              </div>
+                            </label>
 
-                      <label className="method-option">
-                        <input
-                          type="radio"
-                          name="analysisMethod"
-                          value="moving_average"
-                          checked={selectedAnalysisMethod === 'moving_average'}
-                          onChange={(e) => setSelectedAnalysisMethod(e.target.value)}
-                        />
-                        <div className="method-content">
-                          <strong>Moving Average</strong>
-                          <span>Smoothed signal</span>
-                        </div>
-                      </label>
+                            <label className={`method-option ${!compatibleMethods.includes('mean') ? 'disabled' : ''}`}>
+                              <input
+                                type="radio"
+                                name="analysisMethod"
+                                value="mean"
+                                checked={selectedAnalysisMethod === 'mean'}
+                                onChange={(e) => setSelectedAnalysisMethod(e.target.value)}
+                                disabled={!compatibleMethods.includes('mean')}
+                              />
+                              <div className="method-content">
+                                <strong>Mean</strong>
+                                <span>Average value</span>
+                                {!compatibleMethods.includes('mean') && (
+                                  <span className="incompatible-note">Not compatible</span>
+                                )}
+                              </div>
+                            </label>
 
-                      <label className="method-option">
-                        <input
-                          type="radio"
-                          name="analysisMethod"
-                          value="rmssd"
-                          checked={selectedAnalysisMethod === 'rmssd'}
-                          onChange={(e) => setSelectedAnalysisMethod(e.target.value)}
-                        />
-                        <div className="method-content">
-                          <strong>RMSSD</strong>
-                          <span>Root mean square of successive differences</span>
-                        </div>
-                      </label>
-                    </div>
+                            <label className={`method-option ${!compatibleMethods.includes('moving_average') ? 'disabled' : ''}`}>
+                              <input
+                                type="radio"
+                                name="analysisMethod"
+                                value="moving_average"
+                                checked={selectedAnalysisMethod === 'moving_average'}
+                                onChange={(e) => setSelectedAnalysisMethod(e.target.value)}
+                                disabled={!compatibleMethods.includes('moving_average')}
+                              />
+                              <div className="method-content">
+                                <strong>Moving Average</strong>
+                                <span>Smoothed signal</span>
+                                {!compatibleMethods.includes('moving_average') && (
+                                  <span className="incompatible-note">Not compatible</span>
+                                )}
+                              </div>
+                            </label>
+
+                            <label className={`method-option ${!compatibleMethods.includes('rmssd') ? 'disabled' : ''}`}>
+                              <input
+                                type="radio"
+                                name="analysisMethod"
+                                value="rmssd"
+                                checked={selectedAnalysisMethod === 'rmssd'}
+                                onChange={(e) => setSelectedAnalysisMethod(e.target.value)}
+                                disabled={!compatibleMethods.includes('rmssd')}
+                              />
+                              <div className="method-content">
+                                <strong>RMSSD</strong>
+                                <span>Root mean square of successive differences</span>
+                                {!compatibleMethods.includes('rmssd') && (
+                                  <span className="incompatible-note">Not compatible with selected sources</span>
+                                )}
+                              </div>
+                            </label>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
 
                   {/* Plot Type */}
@@ -2059,105 +2208,127 @@ function AnalysisViewer() {
                       </div>
                     )}
 
-                    <div className="plot-grid">
-                      <label className={`plot-option ${selectedAnalysisMethod === 'mean' ? 'disabled' : ''}`}>
-                        <input
-                          type="radio"
-                          name="plotType"
-                          value="lineplot"
-                          checked={selectedPlotType === 'lineplot'}
-                          onChange={(e) => setSelectedPlotType(e.target.value)}
-                          disabled={selectedAnalysisMethod === 'mean'}
-                        />
-                        <div className="plot-content">
-                          <strong>Line Plot</strong>
-                          <span>Time series visualization</span>
-                          {selectedAnalysisMethod === 'mean' && (
-                            <span className="incompatible-note">Requires time-series data</span>
-                          )}
-                          {selectedAnalysisMethod === 'moving_average' && (
-                            <span className="recommended-note">✓ Recommended for Moving Average</span>
-                          )}
-                        </div>
-                      </label>
+                    {(() => {
+                      const { compatiblePlots } = getCompatibleOptions();
+                      const incompatibleCombos = {
+                        'mean': ['lineplot', 'scatter', 'boxplot', 'poincare'],
+                        'rmssd': ['poincare'],
+                        'moving_average': ['poincare']
+                      };
+                      const methodIncompatible = incompatibleCombos[selectedAnalysisMethod] || [];
 
-                      <label className={`plot-option ${selectedAnalysisMethod === 'mean' ? 'disabled' : ''}`}>
-                        <input
-                          type="radio"
-                          name="plotType"
-                          value="boxplot"
-                          checked={selectedPlotType === 'boxplot'}
-                          onChange={(e) => setSelectedPlotType(e.target.value)}
-                          disabled={selectedAnalysisMethod === 'mean'}
-                        />
-                        <div className="plot-content">
-                          <strong>Box Plot</strong>
-                          <span>Distribution summary</span>
-                          {selectedAnalysisMethod === 'mean' && (
-                            <span className="incompatible-note">Requires distribution data</span>
-                          )}
-                        </div>
-                      </label>
+                      return (
+                        <div className="plot-grid">
+                          <label className={`plot-option ${!compatiblePlots.includes('lineplot') || methodIncompatible.includes('lineplot') ? 'disabled' : ''}`}>
+                            <input
+                              type="radio"
+                              name="plotType"
+                              value="lineplot"
+                              checked={selectedPlotType === 'lineplot'}
+                              onChange={(e) => setSelectedPlotType(e.target.value)}
+                              disabled={!compatiblePlots.includes('lineplot') || methodIncompatible.includes('lineplot')}
+                            />
+                            <div className="plot-content">
+                              <strong>Line Plot</strong>
+                              <span>Time series visualization</span>
+                              {!compatiblePlots.includes('lineplot') && (
+                                <span className="incompatible-note">Not compatible with selected sources</span>
+                              )}
+                              {compatiblePlots.includes('lineplot') && methodIncompatible.includes('lineplot') && (
+                                <span className="incompatible-note">Requires time-series data</span>
+                              )}
+                              {compatiblePlots.includes('lineplot') && selectedAnalysisMethod === 'moving_average' && (
+                                <span className="recommended-note">✓ Recommended for Moving Average</span>
+                              )}
+                            </div>
+                          </label>
 
-                      <label className={`plot-option ${['rmssd', 'moving_average', 'mean'].includes(selectedAnalysisMethod) ? 'disabled' : ''}`}>
-                        <input
-                          type="radio"
-                          name="plotType"
-                          value="poincare"
-                          checked={selectedPlotType === 'poincare'}
-                          onChange={(e) => setSelectedPlotType(e.target.value)}
-                          disabled={['rmssd', 'moving_average', 'mean'].includes(selectedAnalysisMethod)}
-                        />
-                        <div className="plot-content">
-                          <strong>Poincaré Plot</strong>
-                          <span>HRV analysis</span>
-                          {selectedAnalysisMethod === 'rmssd' && (
-                            <span className="incompatible-note">Requires raw data</span>
-                          )}
-                          {selectedAnalysisMethod === 'moving_average' && (
-                            <span className="incompatible-note">Requires raw data</span>
-                          )}
-                          {selectedAnalysisMethod === 'mean' && (
-                            <span className="incompatible-note">Requires multiple data points</span>
-                          )}
-                        </div>
-                      </label>
+                          <label className={`plot-option ${!compatiblePlots.includes('boxplot') || methodIncompatible.includes('boxplot') ? 'disabled' : ''}`}>
+                            <input
+                              type="radio"
+                              name="plotType"
+                              value="boxplot"
+                              checked={selectedPlotType === 'boxplot'}
+                              onChange={(e) => setSelectedPlotType(e.target.value)}
+                              disabled={!compatiblePlots.includes('boxplot') || methodIncompatible.includes('boxplot')}
+                            />
+                            <div className="plot-content">
+                              <strong>Box Plot</strong>
+                              <span>Distribution summary</span>
+                              {!compatiblePlots.includes('boxplot') && (
+                                <span className="incompatible-note">Not compatible with selected sources</span>
+                              )}
+                              {compatiblePlots.includes('boxplot') && methodIncompatible.includes('boxplot') && (
+                                <span className="incompatible-note">Requires distribution data</span>
+                              )}
+                            </div>
+                          </label>
 
-                      <label className={`plot-option ${selectedAnalysisMethod === 'mean' ? 'disabled' : ''}`}>
-                        <input
-                          type="radio"
-                          name="plotType"
-                          value="scatter"
-                          checked={selectedPlotType === 'scatter'}
-                          onChange={(e) => setSelectedPlotType(e.target.value)}
-                          disabled={selectedAnalysisMethod === 'mean'}
-                        />
-                        <div className="plot-content">
-                          <strong>Scatter Plot</strong>
-                          <span>Point distribution</span>
-                          {selectedAnalysisMethod === 'mean' && (
-                            <span className="incompatible-note">Requires multiple data points</span>
-                          )}
-                        </div>
-                      </label>
+                          <label className={`plot-option ${!compatiblePlots.includes('poincare') || methodIncompatible.includes('poincare') ? 'disabled' : ''}`}>
+                            <input
+                              type="radio"
+                              name="plotType"
+                              value="poincare"
+                              checked={selectedPlotType === 'poincare'}
+                              onChange={(e) => setSelectedPlotType(e.target.value)}
+                              disabled={!compatiblePlots.includes('poincare') || methodIncompatible.includes('poincare')}
+                            />
+                            <div className="plot-content">
+                              <strong>Poincaré Plot</strong>
+                              <span>HRV analysis</span>
+                              {!compatiblePlots.includes('poincare') && (
+                                <span className="incompatible-note">Only for EmotiBit data</span>
+                              )}
+                              {compatiblePlots.includes('poincare') && methodIncompatible.includes('poincare') && (
+                                <span className="incompatible-note">Requires raw data</span>
+                              )}
+                            </div>
+                          </label>
 
-                      <label className="plot-option">
-                        <input
-                          type="radio"
-                          name="plotType"
-                          value="barchart"
-                          checked={selectedPlotType === 'barchart'}
-                          onChange={(e) => setSelectedPlotType(e.target.value)}
-                        />
-                        <div className="plot-content">
-                          <strong>Bar Chart</strong>
-                          <span>Statistical comparison</span>
-                          {selectedAnalysisMethod === 'mean' && (
-                            <span className="recommended-note">✓ Recommended for Mean analysis</span>
-                          )}
+                          <label className={`plot-option ${!compatiblePlots.includes('scatter') || methodIncompatible.includes('scatter') ? 'disabled' : ''}`}>
+                            <input
+                              type="radio"
+                              name="plotType"
+                              value="scatter"
+                              checked={selectedPlotType === 'scatter'}
+                              onChange={(e) => setSelectedPlotType(e.target.value)}
+                              disabled={!compatiblePlots.includes('scatter') || methodIncompatible.includes('scatter')}
+                            />
+                            <div className="plot-content">
+                              <strong>Scatter Plot</strong>
+                              <span>Point distribution</span>
+                              {!compatiblePlots.includes('scatter') && (
+                                <span className="incompatible-note">Not compatible with selected sources</span>
+                              )}
+                              {compatiblePlots.includes('scatter') && methodIncompatible.includes('scatter') && (
+                                <span className="incompatible-note">Requires multiple data points</span>
+                              )}
+                            </div>
+                          </label>
+
+                          <label className={`plot-option ${!compatiblePlots.includes('barchart') ? 'disabled' : ''}`}>
+                            <input
+                              type="radio"
+                              name="plotType"
+                              value="barchart"
+                              checked={selectedPlotType === 'barchart'}
+                              onChange={(e) => setSelectedPlotType(e.target.value)}
+                              disabled={!compatiblePlots.includes('barchart')}
+                            />
+                            <div className="plot-content">
+                              <strong>Bar Chart</strong>
+                              <span>Statistical comparison</span>
+                              {!compatiblePlots.includes('barchart') && (
+                                <span className="incompatible-note">Not compatible with selected sources</span>
+                              )}
+                              {compatiblePlots.includes('barchart') && selectedAnalysisMethod === 'mean' && (
+                                <span className="recommended-note">✓ Recommended for Mean analysis</span>
+                              )}
+                            </div>
+                          </label>
                         </div>
-                      </label>
-                    </div>
+                      );
+                    })()}
                     
                     {selectedAnalysisMethod === 'mean' && (
                       <div className="compatibility-hint">

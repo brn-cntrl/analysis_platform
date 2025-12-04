@@ -1700,3 +1700,41 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Add after the existing .method-option styles */
+.method-option.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: #f5f5f5;
+  border-color: #e0e0e0;
+}
+
+.method-option.disabled:hover {
+  border-color: #e0e0e0;
+  background-color: #f5f5f5;
+  transform: none;
+}
+
+.method-option.disabled input[type="radio"] {
+  cursor: not-allowed;
+}
+
+.method-option.disabled .method-content strong,
+.method-option.disabled .method-content span {
+  color: #999;
+}
+
+/* Add new compatibility notice style */
+.compatibility-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  background-color: #e3f2fd;
+  border: 1px solid #2196F3;
+  border-radius: 4px;
+  margin-bottom: 15px;
+  font-size: 13px;
+  color: #1565c0;
+  line-height: 1.5;
+}
