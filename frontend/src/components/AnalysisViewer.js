@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import './AnalysisViewer.css';
 import ExternalConfigStep from './ExternalConfigStep';
 import './ExternalConfigStep.css';
@@ -57,6 +57,7 @@ function AnalysisViewer() {
   const [needsDataParser, setNeedsDataParser] = useState(false);
   const [subjectsNeedingParser, setSubjectsNeedingParser] = useState([]);
   const [parserLaunchStatus, setParserLaunchStatus] = useState('');
+  const [parseLSLStatus, setParseLSLStatus] = useState('');
 
   // Respiratory data state
   const [hasRespiratoryData, setHasRespiratoryData] = useState(false);
@@ -79,6 +80,9 @@ function AnalysisViewer() {
   const [selectedAnalysisMethod, setSelectedAnalysisMethod] = useState('raw');
   const [selectedPlotType, setSelectedPlotType] = useState('lineplot');
   const [configIssues, setConfigIssues] = useState([]);
+
+  // REFS
+  const fileInputRef = useRef(null);
 
   // Data cleaning state
   const [cleaningEnabled, setCleaningEnabled] = useState(false);
@@ -394,6 +398,35 @@ function AnalysisViewer() {
     localStorage.clear();
     setIsLoggedIn(false);
     setLoginStudentId('');
+  };
+
+  const handleLSLFileSelect = async (e) => {
+    const file = e.target.files[0];
+    if (!file) {
+      setParseLSLStatus('No file selected');
+      return;
+    }
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', file);  // Add the file!
+      
+      const response = await fetch('/api/extract_lsl_markers', {
+        method: 'POST',
+        body: formData  // NOT JSON - send FormData
+        // Do NOT set Content-Type header - let browser set it with boundary
+      });
+      
+      const data = await response.json();
+      if (response.ok) {
+        // Use markers_count from endpoint response
+        setParseLSLStatus(`✓ LSL markers extracted: ${data.markers_count} markers found`);
+      } else {
+        setParseLSLStatus(`Error: ${data.error}`);
+      }
+    } catch (error) {
+      setParseLSLStatus(`Error: ${error.message}`);
+    }
   };
 
   const handleLaunchDataParser = async () => {
@@ -1598,6 +1631,20 @@ function AnalysisViewer() {
             {parserLaunchStatus && (
               <div className={`parser-status ${parserLaunchStatus.includes('Error') ? 'error' : 'success'}`}>
                 {parserLaunchStatus}
+              </div>
+            )}
+            <input 
+              type="file" 
+              ref={fileInputRef}
+              onChange={handleLSLFileSelect}
+              style={{ display: 'none' }}
+            />
+            <button onClick={() => fileInputRef.current?.click()}>
+              Parse Event Markers from LSL File
+            </button>
+            {parseLSLStatus && (
+              <div className={`parser-status ${parseLSLStatus.includes('Error') ? 'error' : 'success'}`}>
+                {parseLSLStatus}
               </div>
             )}
           </div>

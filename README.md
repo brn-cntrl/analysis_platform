@@ -23,6 +23,9 @@ A web-based platform for analyzing EmotiBit biometric data with interactive visu
 - External data files (e.g. those collected in PsychoPy) should be placed in the subject's "external_data" folder, found at the same level as emotibit_data and respiratory_data folders.
 
 ### Paths
+#### IMPORTANT 
+All data is expected to be stored according to the following path structure. When processing data collected by the Experiment Platform, please navigate to the desired trial folder. Batch processing for full experiments (navigating to the <experiment_name> folder will not work and is not recommended due to potential bottlenecks. See "Next Steps" for more information.
+
 - Emotibit data: subject_data/<experiment_name>/<trial_name>/<subject_id>/emotibit_data/
 - Respiratory data (vernier belt): subject_data/<experiment_name>/<trial_name>/<subject_id>/respiratory_data/
 - Respiratory/Cardiac data (Polar H10): subject_data/<experiment_name>/<trial_name>/<subject_id>/cardiac_data/

@@ -127,6 +127,73 @@ def launch_emotibit_parser():
             "error": str(e)
         }), 500
 
+
+@app.route('/extract_lsl_markers', methods=['POST'])
+def extract_lsl_markers():
+    """
+    Extract LSL markers from uploaded EmotiBit raw file.
+    Expects file upload with key 'file'
+    """
+    
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+    
+    file = request.files['file']
+    
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    
+    if not file.filename.endswith('.csv'):
+        return jsonify({'error': 'File must be a CSV'}), 400
+    
+    try:
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        file.save(filepath)
+        
+        markers = []
+        
+        with open(filepath, 'r', encoding='utf-8') as f:
+            for line in f:
+                if line.startswith(('%', '#')):
+                    continue
+                
+                parts = line.strip().split(',')
+                if len(parts) < 7:
+                    continue
+                
+                if parts[3] == 'LM':
+                    payload = {}
+                    for i in range(6, len(parts) - 1, 2):
+                        if i + 1 < len(parts):
+                            key = parts[i].strip()
+                            value = parts[i + 1].strip()
+                            if key and value:
+                                payload[key] = value
+                    
+                    if 'LD' in payload:
+                        markers.append({
+                            'EmotiBitTimestamp': int(parts[0]),
+                            'PacketNumber': int(parts[1]),
+                            'LslLocalTimestamp': float(payload.get('LC', 0)),
+                            'LslMarkerSourceTimestamp': float(payload.get('LM', 0)),
+                            'LslMarkerRxTimestamp': float(payload.get('LR', 0)),
+                            'MarkerData': payload['LD']
+                        })
+        
+        os.remove(filepath)
+        
+        return jsonify({
+            'success': True,
+            'markers_count': len(markers),
+            'markers': markers
+        })
+        
+    except Exception as e:
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/upload-folder-and-analyze', methods=['POST'])
 def upload_folder_and_analyze():
     
