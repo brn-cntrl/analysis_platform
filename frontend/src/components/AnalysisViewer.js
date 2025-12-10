@@ -461,6 +461,38 @@ function AnalysisViewer() {
     const folderName = files[0].webkitRelativePath.split('/')[0];
     setSelectedFolder(folderName);
 
+    setAvailableSubjects([]);
+  setSelectedSubjects({});
+  setAvailableMetrics([]);
+  setSelectedMetrics({});
+  setAvailableEventMarkers([]);
+  setAvailableConditions([]);
+  setSubjectAvailability({});
+  setBatchStatusMessage('');
+  setIsBatchMode(false);
+  
+  // Reset external data state
+  setHasExternalFiles(false);
+  setExternalFilesBySubject({});
+  setsubjectsWithExternal([]);
+  setExternalConfigs({});
+  
+  // Reset respiratory data state
+  setHasRespiratoryData(false);
+  setSubjectsWithRespiratory([]);
+  setRespiratoryConfigs({});
+  
+  // Reset cardiac data state
+  setHasCardiacData(false);
+  setSubjectsWithCardiac([]);
+  setCardiacConfigs({});
+  
+  // Reset wizard state
+  setShowConfigWizard(false);
+  setWizardStep(0);
+  setConfigIssues([]);
+  setSelectedEvents([{ event: '', condition: 'all' }]);
+
     const structure = {
       emotibitFiles: [],
       respirationFiles: [],
@@ -536,8 +568,13 @@ function AnalysisViewer() {
   };
 
   const scanFolderData = async (structure) => {
-    if (!structure.emotibitFiles || structure.emotibitFiles.length === 0) {
-      setUploadStatus('No EmotiBit files found');
+    const hasAnyData = (structure.emotibitFiles && structure.emotibitFiles.length > 0) ||
+                      (structure.respirationFiles && structure.respirationFiles.length > 0) ||
+                      (structure.cardiacFiles && structure.cardiacFiles.length > 0) ||
+                      (structure.externalFiles && structure.externalFiles.length > 0);
+    
+    if (!hasAnyData) {
+      setUploadStatus('No data files found (EmotiBit, respiratory, cardiac, or external)');
       return;
     }
 
@@ -670,6 +707,7 @@ function AnalysisViewer() {
       const respiratoryPaths = structure.respirationFiles.map(f => f.path);
       formData.append('respiratory_filenames', JSON.stringify(respiratoryPaths));
       console.log(`Sending ${respiratoryPaths.length} respiratory file path(s) to backend`);
+      console.log('RESPIRATORY PATHS BEING SENT:', respiratoryPaths);
     }
     
     if (structure.cardiacFiles.length > 0) {
@@ -759,9 +797,16 @@ function AnalysisViewer() {
         } else {
           setHasExternalFiles(false);
           setExternalFilesBySubject({});
+          setsubjectsWithExternal([]);
+          setExternalConfigs({});
         }
 
         // Process respiratory data detection
+        console.log('BACKEND RESPONSE - respiratory_data:', data.respiratory_data);
+        console.log('  has_files:', data.respiratory_data?.has_files);
+        console.log('  files_by_subject:', data.respiratory_data?.files_by_subject);
+        console.log('  subjects_with_respiratory:', data.respiratory_data?.subjects_with_respiratory);
+
         if (data.respiratory_data && data.respiratory_data.has_files) {
           console.log('Respiratory data files detected:', data.respiratory_data.files_by_subject);
           setSubjectsWithRespiratory(data.respiratory_data.subjects_with_respiratory);
@@ -780,6 +825,7 @@ function AnalysisViewer() {
         } else {
           setHasRespiratoryData(false);
           setSubjectsWithRespiratory([]);
+          setRespiratoryConfigs({});
         }
         // Process cardiac data detection
         if (data.cardiac_data && data.cardiac_data.has_files) {
@@ -800,6 +846,7 @@ function AnalysisViewer() {
         } else {
           setHasCardiacData(false);
           setSubjectsWithCardiac([]);
+          setCardiacConfigs({});
         }
 
         const eventMarkersMsg = data.event_markers && data.event_markers.length > 0 
