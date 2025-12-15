@@ -1319,10 +1319,16 @@ def analyze_respiratory_data(manifest, respiratory_configs, comparison_groups, o
                     for group_label, stats in results.items():
                         composite_label = f"{subject} - RR - {group_label}"
                         all_results[composite_label] = stats
+                
+                if plots:
                     all_plots.extend(plots)
+                else:
+                    print(f"      No plots generated for RR (likely due to sparse data)")
                     
             except Exception as e:
                 print(f"      Error analyzing RR: {e}")
+                import traceback
+                traceback.print_exc()
         
         # Analyze Force if selected
         if config.get('analyzeForce', True) and 'force' in df_resp.columns:
@@ -1346,6 +1352,7 @@ def analyze_respiratory_data(manifest, respiratory_configs, comparison_groups, o
                     for group_label, stats in results.items():
                         composite_label = f"{subject} - Force - {group_label}"
                         all_results[composite_label] = stats
+                if plots:
                     all_plots.extend(plots)
                     
             except Exception as e:
@@ -1386,27 +1393,78 @@ def analyze_respiratory_metric(df_resp, metric_col, df_markers, offset, comparis
     Returns:
         Tuple of (results_dict, plots_list)
     """
-    # Create standardized structure
     df_processed = pd.DataFrame({
         'LocalTimestamp': df_resp['LocalTimestamp'],
         metric_col: df_resp[metric_col]
     })
-    
-    # Apply data cleaning if enabled
+
+    # Check data sparsity for RR (which is typically measured per breath cycle)
+    non_null_count = df_processed[metric_col].notna().sum()
+    total_count = len(df_processed)
+    sparsity_ratio = non_null_count / total_count if total_count > 0 else 0
+
+    print(f"        Data sparsity: {non_null_count}/{total_count} ({sparsity_ratio*100:.1f}% non-null)")
+
+    if sparsity_ratio < 0.1:
+        print(f"        WARNING: Very sparse data for {metric_col} (<10% non-null values)")
+        print(f"        This may affect analysis quality")
+
+   # Apply data cleaning if enabled
     if cleaning_enabled:
         from DataCleaner import BiometricDataCleaner
-        # RR is like HR, force is like a force sensor
-        metric_type = 'HR' if metric_col == 'RR' else 'default'
-        cleaner = BiometricDataCleaner(metric_type=metric_type)
-        df_processed = cleaner.clean(
-            df_processed,
-            metric_col,
-            timestamp_col='LocalTimestamp',
-            stages=cleaning_stages
-        )
+        
+        # Check if metric is sparse (common for RR which is per-breath, not per-sample)
+        non_null_count = df_processed[metric_col].notna().sum()
+        total_count = len(df_processed)
+        sparsity_ratio = non_null_count / total_count if total_count > 0 else 0
+        
+        print(f"        Data density: {non_null_count}/{total_count} ({sparsity_ratio*100:.1f}% non-null)")
+        
+        if sparsity_ratio < 0.5:  # If more than 50% sparse
+            print(f"        Detected sparse metric - cleaning only non-null values without removing rows")
+            
+            # For sparse metrics, only clean the non-null values
+            # Create a mask for non-null values
+            valid_mask = df_processed[metric_col].notna()
+            
+            if valid_mask.sum() > 0:
+                # Extract only non-null rows for cleaning
+                df_to_clean = df_processed[valid_mask].copy()
+                
+                metric_type = 'RR' if metric_col == 'RR' else 'default'
+                cleaner = BiometricDataCleaner(metric_type=metric_type)
+                
+                # Clean only the valid data
+                df_cleaned = cleaner.clean(
+                    df_to_clean,
+                    metric_col,
+                    timestamp_col='LocalTimestamp',
+                    stages=cleaning_stages
+                )
+                
+                # Merge cleaned values back into original dataframe structure
+                # This preserves the timeline with NaN values intact
+                df_processed.loc[valid_mask, metric_col] = df_cleaned[metric_col].values
+                
+                print(f"        Cleaned {len(df_cleaned)}/{non_null_count} non-null values")
+            else:
+                print(f"        No non-null values to clean")
+        else:
+            # Continuous data - clean normally
+            print(f"        Continuous metric - applying standard cleaning")
+            metric_type = 'RR' if metric_col == 'RR' else 'default'
+            cleaner = BiometricDataCleaner(metric_type=metric_type)
+            df_processed = cleaner.clean(
+                df_processed,
+                metric_col,
+                timestamp_col='LocalTimestamp',
+                stages=cleaning_stages
+            )
     
-    if len(df_processed) == 0:
-        print(f"        WARNING: All data removed during cleaning")
+    # Check if we have any valid data after cleaning
+    valid_data_count = df_processed[metric_col].notna().sum()
+    if valid_data_count == 0:
+        print(f"        WARNING: No valid data available after cleaning")
         return None, []
     
     # Extract data for each comparison group
@@ -1570,6 +1628,9 @@ def analyze_cardiac_data(manifest, cardiac_configs, comparison_groups, output_fo
                     for group_label, stats in results.items():
                         composite_label = f"{subject} - HR - {group_label}"
                         all_results[composite_label] = stats
+
+                # Always add plots if they exist, regardless of results
+                if plots:
                     all_plots.extend(plots)
                     
             except Exception as e:
