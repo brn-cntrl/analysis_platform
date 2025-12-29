@@ -216,3 +216,85 @@ class BiometricDataCleaner:
             print(f"Applied median filter (window={window})")
         
         return df
+
+    def bang_detect(self, x, y, z, type):
+        # initialize and combine all
+        df = pd.DataFrame()
+        df["LocalTimestamp"] = x["LocalTimestamp"]
+        df[f"{type}X"] = x[f"{type}X"]
+        df[f"{type}Y"] = y[f"{type}Y"]
+        df[f"{type}Z"] = z[f"{type}Z"]
+
+        return df
+
+    def flag(self, df, type, upper_threshold, lower_threshold):
+        df["flag"] = "hi"
+
+        def in_range(row):
+            return (lower_threshold <= row[f"{type}X"] <= upper_threshold) and (lower_threshold <= row[f"{type}Y"] <= upper_threshold) and (lower_threshold <= row[f"{type}Z"] <= upper_threshold)
+
+        flags = []
+
+        i = 0
+        n = len(df)
+
+        while i < n:
+            if in_range(df.iloc[i]): # if within thresholds
+                while i < n and in_range(df.iloc[i]): # while signal continues to be within the thresholds
+                    flags.append(1)  # flag as 1
+                    i += 1 # go to next row
+            else: # if not within thresholds
+                while i < n and not in_range(df.iloc[i]): # while 20 rows down is not within thresholds
+                    flags.append(0) # flag as 0
+                    i += 1 # move to next row
+
+        df["flag"] = flags
+
+        return df
+
+
+    def interval_marking(self, precleaned_data, flagged_df, interval_size):
+        mask = np.zeros(len(flagged_df), dtype=bool)
+        zero_ind = np.where(flagged_df["flag"].values == 0)[0]
+
+        if len(zero_ind) > 0:
+            for idx in zero_ind:
+                start = max(0, idx - interval_size)
+                end = min(len(flagged_df), idx + interval_size + 1)
+                mask[start:end] = True
+
+            flagged_df["flag"] = np.where(mask, 0, flagged_df["flag"])
+
+
+            unusable_ind = flagged_df[flagged_df["flag"] == 0].index
+            start = unusable_ind[0]
+            intervals = []
+
+
+            for i in range(1, len(unusable_ind)):
+                if unusable_ind[i] == unusable_ind[i - 1] + 1:
+                    continue
+                else:
+                    intervals.append((start, unusable_ind[i - 1]))
+                    start = unusable_ind[i]
+            intervals.append((start, unusable_ind[-1]))
+
+            unusable_data = pd.DataFrame()
+            for i in intervals:
+                temp = flagged_df[(flagged_df.index >= i[0]) & (flagged_df.index <= i[1])]
+                unusable_data = pd.concat([unusable_data, temp])
+
+            timestamps = []
+            for i in intervals:
+                temp_2 = flagged_df[(flagged_df.index >= i[0]) & (flagged_df.index <= i[1])]
+                timestamps.append((temp_2.iloc[0]["LocalTimestamp"], temp_2.iloc[-1]["LocalTimestamp"]))
+
+            unusable_metric_data = pd.DataFrame()
+            for i in timestamps:
+                temp_3 = precleaned_data[(precleaned_data["LocalTimestamp"] >= i[0]) & (precleaned_data["LocalTimestamp"] <= i[1])]
+                unusable_metric_data = pd.concat([unusable_metric_data, temp_3])
+            cleaned_data = precleaned_data.loc[~precleaned_data.index.isin(unusable_metric_data.index)]
+            
+            return cleaned_data
+        else:
+            return precleaned_data
