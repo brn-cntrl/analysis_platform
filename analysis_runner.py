@@ -196,9 +196,7 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
             )
             
             if external_results:
-                # Merge external results into main analysis results
                 for data_label, stats in external_results.items():
-                    # Use a special key format to distinguish external data
                     results['analysis'][f"External: {data_label}"] = stats
                 
                 results['plots'].extend(external_plots)
@@ -273,7 +271,6 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
             )
             
             if cardiac_results:
-                # Merge cardiac results into main analysis results
                 for metric_label, stats in cardiac_results.items():
                     results['analysis'][f"Cardiac: {metric_label}"] = stats
                 
@@ -289,19 +286,16 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
             traceback.print_exc()
             print()
 
-    # Analyze selected metrics
     if df_markers is not None and selected_metrics:
         print(f"4. ANALYZING SELECTED METRICS (Method: {get_method_label(analysis_method)})")
         print("-" * 80)
         
-        # Synchronize HRV flag with selected metrics
         if 'HRV' in selected_metrics and not analyze_hrv:
             print("HRV detected in metrics list - enabling HRV analysis")
             analyze_hrv = True
         
         for metric in selected_metrics:
             if metric == 'HRV':
-                # HRV is handled separately above
                 print(f"\nSkipping HRV (handled in dedicated HRV analysis section)")
                 continue
                 
@@ -360,7 +354,6 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
                                 print(f"No {metric} file found - skipping")
                                 continue
                             
-                            # Run single-subject analysis
                             try:
                                 subject_short = subject[:30]  # First 30 chars to keep filename reasonable
 
@@ -458,7 +451,6 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
                         print(f"Error validating metric file: {e}")
                         continue
                     
-                    # Use original single-subject logic
                     metric_results, metric_plots = analyze_metric(
                         metric_file, 
                         df_markers, 
@@ -529,15 +521,12 @@ def analyze_metric(metric_file, df_markers, comparison_groups, metric,
     df_metric = pd.read_csv(metric_file)
     print(f"Loaded {df_metric.shape[0]} rows")
 
-    # Apply data cleaning if enabled
     if cleaning_enabled:
         from DataCleaner import BiometricDataCleaner
         cleaner = BiometricDataCleaner(metric_type=metric)
         metric_col = df_metric.columns[-1]
         
-        # Apply motion artifact cleaning FIRST (if enabled)
         if cleaning_stages.get('remove_motion_artifacts', False):
-            # Extract subject from metric_file path
             path_parts = metric_file.split(os.sep)
             subject_id = None
             for i, part in enumerate(path_parts):
@@ -547,7 +536,6 @@ def analyze_metric(metric_file, df_markers, comparison_groups, metric,
             
             if subject_id:
                 print(f"  Applying motion artifact cleaning for subject: {subject_id}")
-                # Get upload folder (go up from metric_file to find root)
                 upload_folder = os.path.dirname(os.path.dirname(os.path.dirname(metric_file)))
                 
                 df_metric = cleaner.clean_motion_artifacts(
@@ -559,7 +547,6 @@ def analyze_metric(metric_file, df_markers, comparison_groups, metric,
         else:
             print(f"  WARNING: Could not determine subject ID from path, skipping motion artifact cleaning")
     
-    # Then apply other cleaning stages
     df_metric = cleaner.clean(
         df_metric, 
         metric_col, 
@@ -612,7 +599,6 @@ def analyze_metric(metric_file, df_markers, comparison_groups, metric,
         print(f"Warning: No successfully processed groups - skipping {metric}")
         return None, []
     
-    # Calculate statistics
     print(f"\nCalculating statistics...")
     metric_results = {}
     
@@ -622,12 +608,9 @@ def analyze_metric(metric_file, df_markers, comparison_groups, metric,
         
         print(f"{group_label}: mean={stats['mean']:.2f}, std={stats['std']:.2f}, n={stats['count']}")
     
-    # Generate plots
-    # Generate plots
     print(f"\nCreating visualizations (Plot type: {plot_type})...")
     plots = []
     
-    # Main plot based on selected type (skip for barchart - it's the comparison plot)
     if plot_type != 'barchart':
         plot1 = generate_plot(
             group_data_processed, 
@@ -682,7 +665,6 @@ def analyze_metric_multi_subject(manifest, selected_subjects, comparison_groups,
     """
     print(f"Loading data for {len(selected_subjects)} subjects...")
     
-    # Data structure: {composite_label: DataFrame}
     group_data_raw = {}
     
     # ═══════════════════════════════════════════════════════════════
@@ -692,7 +674,6 @@ def analyze_metric_multi_subject(manifest, selected_subjects, comparison_groups,
     for subject in selected_subjects:
         print(f"\nProcessing subject: {subject}")
         
-        # Get files specific to this subject
         subject_files = get_subject_files(manifest, subject)
         
         if not subject_files['emotibit_files']:
@@ -703,7 +684,6 @@ def analyze_metric_multi_subject(manifest, selected_subjects, comparison_groups,
             print(f"No event markers found for {subject} - skipping")
             continue
         
-        # Load metric file for this subject
         metric_file = find_metric_file_for_subject(subject_files, metric)
         if not metric_file:
             print(f"No {metric} file found for {subject} - skipping")
@@ -716,12 +696,10 @@ def analyze_metric_multi_subject(manifest, selected_subjects, comparison_groups,
             metric_col_name = df_metric.columns[-1]
             print(f"Detected metric column: '{metric_col_name}'")
 
-        # Apply data cleaning if enabled
         if cleaning_enabled:
             from DataCleaner import BiometricDataCleaner
             cleaner = BiometricDataCleaner(metric_type=metric)
             
-            # Apply motion artifact cleaning FIRST (if enabled)
             if cleaning_stages.get('remove_motion_artifacts', False):
                 print(f"  Applying motion artifact cleaning for subject: {subject}")
                 upload_folder = os.path.dirname(os.path.dirname(os.path.dirname(metric_file)))
@@ -733,7 +711,6 @@ def analyze_metric_multi_subject(manifest, selected_subjects, comparison_groups,
                     upload_folder=upload_folder
                 )
             
-            # Then apply other cleaning stages
             df_metric = cleaner.clean(
                 df_metric,
                 metric_col_name, 
@@ -817,7 +794,7 @@ def analyze_metric_multi_subject(manifest, selected_subjects, comparison_groups,
     if plot_type != 'barchart':
         plot1 = generate_plot(
             group_data_processed, 
-            metric_col_name,  # ✅ Use metric_col_name
+            metric_col_name,  
             metric, 
             plot_type,
             analysis_method,
@@ -1015,7 +992,6 @@ def analyze_external_data(manifest, external_configs, comparison_groups, output_
     all_results = {}
     all_plots = []
     
-    # Process each subject's external files
     for subject, files_config in external_configs.items():
         print(f"\n  Subject: {subject}")
         
@@ -1024,13 +1000,11 @@ def analyze_external_data(manifest, external_configs, comparison_groups, output_
             print(f"    Skipping (not in selected subjects)")
             continue
         
-        # Load event markers for this subject
         df_markers = load_event_markers_for_subject(manifest, subject, batch_mode)
         if df_markers is None:
             print(f"    No event markers found - skipping")
             continue
         
-        # Process each selected external file for this subject
         for filename, config in files_config.items():
             if not config.get('selected', True):
                 print(f"    Skipping {filename} (not selected)")
@@ -1038,13 +1012,11 @@ def analyze_external_data(manifest, external_configs, comparison_groups, output_
             
             print(f"\n    Processing: {filename}")
             
-            # Find the file in manifest
             external_file = find_external_file_in_manifest(manifest, subject, filename)
             if not external_file:
                 print(f"      File not found in manifest")
                 continue
             
-            # Process each configured data column
             for data_col_config in config.get('dataColumns', []):
                 if not data_col_config.get('column'):
                     continue
@@ -1066,7 +1038,6 @@ def analyze_external_data(manifest, external_configs, comparison_groups, output_
                     )
                     
                     if results:
-                        # Create composite label
                         display_name = data_col_config.get('displayName') or data_col_config['column']
                         composite_label = f"{subject} - {filename} - {display_name}"
                         
@@ -1079,7 +1050,6 @@ def analyze_external_data(manifest, external_configs, comparison_groups, output_
     
     print(f"\n  External data analysis complete: {len(all_results)} data series processed")
     return all_results, all_plots
-
 
 def load_event_markers_for_subject(manifest, subject, batch_mode):
     """Load event markers for a specific subject."""
@@ -1129,10 +1099,8 @@ def process_external_file_column(file_path, config, data_col_config, df_markers,
     """
     print(f"      Loading column: {data_col_config['column']}")
     
-    # Load external CSV
     df = pd.read_csv(file_path)
-    
-    # Get column names from config
+ 
     timestamp_col = config['timestampColumn']
     data_col = data_col_config['column']
     display_name = data_col_config.get('displayName') or data_col
@@ -1141,29 +1109,22 @@ def process_external_file_column(file_path, config, data_col_config, df_markers,
         print(f"        ERROR: Required columns not found")
         return None, []
     
-    # Convert timestamp to unix format based on user's selection
     timestamp_format = config.get('timestampFormat', 'seconds')
     
     if timestamp_format == 'seconds':
-        # Seconds since experiment start - need to align with event markers
         df['UnixTimestamp'] = df[timestamp_col]
     elif timestamp_format == 'milliseconds':
-        # Convert milliseconds to seconds
         df['UnixTimestamp'] = df[timestamp_col] / 1000.0
     elif timestamp_format == 'unix':
-        # Already unix timestamp
         df['UnixTimestamp'] = df[timestamp_col]
     
-    # Create a standardized DataFrame structure similar to EmotiBit
     df_processed = pd.DataFrame({
         'LocalTimestamp': df['UnixTimestamp'],
         data_col: df[data_col]
     })
     
-    # Apply data cleaning if enabled
     if cleaning_enabled:
         from DataCleaner import BiometricDataCleaner
-        # Try to infer metric type from display name, otherwise use generic
         metric_type = 'default'
         cleaner = BiometricDataCleaner(metric_type=metric_type)
         df_processed = cleaner.clean(
@@ -1180,17 +1141,14 @@ def process_external_file_column(file_path, config, data_col_config, df_markers,
     # Calculate timestamp offset (external data might start at different time)
     # If format is 'seconds' or 'milliseconds', we need to align with event markers
     if timestamp_format in ['seconds', 'milliseconds']:
-        # Assume external data starts at same time as first event marker
         first_event_time = df_markers['unix_timestamp'].min()
         first_data_time = df_processed['LocalTimestamp'].min()
         offset = first_event_time - first_data_time
     else:
-        # Unix timestamp - calculate offset normally
         offset = find_timestamp_offset(df_markers, df_processed)
     
     print(f"        Timestamp offset: {offset:.2f}s")
     
-    # Extract data for each comparison group
     group_data_raw = {}
     
     for group in comparison_groups:
@@ -1205,7 +1163,6 @@ def process_external_file_column(file_path, config, data_col_config, df_markers,
         print(f"        No data extracted for any event")
         return None, []
     
-    # Apply analysis method
     group_data_processed = {}
     for group_label, data in group_data_raw.items():
         try:
@@ -1215,16 +1172,13 @@ def process_external_file_column(file_path, config, data_col_config, df_markers,
             print(f"        Error processing {group_label}: {e}")
             continue
     
-    # Calculate statistics
     results = {}
     for group_label, data in group_data_processed.items():
         stats = calculate_statistics(data, data_col, analysis_method)
         results[group_label] = stats
     
-    # Generate plots
     plots = []
     
-    # Main plot
     if plot_type != 'barchart':
         suffix = f"_ext_{subject_label}_{filename_label.replace('.csv', '')}"
         plot = generate_plot(
@@ -1240,7 +1194,6 @@ def process_external_file_column(file_path, config, data_col_config, df_markers,
         if plot:
             plots.append(plot)
     
-    # Comparison plot
     if len(group_data_processed) >= 2:
         suffix = f"_ext_{subject_label}_{filename_label.replace('.csv', '')}"
         comp_plot = generate_comparison_plot(
@@ -1282,26 +1235,22 @@ def analyze_respiratory_data(manifest, respiratory_configs, comparison_groups, o
     all_results = {}
     all_plots = []
     
-    # Process each subject's respiratory data
     for subject, config in respiratory_configs.items():
         if not config.get('selected', True):
             print(f"  Skipping {subject} (not selected)")
             continue
         
-        # Skip if subject not selected
         if batch_mode and selected_subjects and subject not in selected_subjects:
             print(f"  Skipping {subject} (not in selected subjects)")
             continue
         
         print(f"\n  Subject: {subject}")
         
-        # Load event markers for this subject
         df_markers = load_event_markers_for_subject(manifest, subject, batch_mode)
         if df_markers is None:
             print(f"    No event markers found - skipping")
             continue
         
-        # Find respiratory file for this subject
         resp_file = find_respiratory_file_for_subject(manifest, subject)
         if not resp_file:
             print(f"    No respiratory file found - skipping")
@@ -1309,34 +1258,26 @@ def analyze_respiratory_data(manifest, respiratory_configs, comparison_groups, o
         
         print(f"    Loading: {os.path.basename(resp_file)}")
         
-        # Load respiratory data
         df_resp = pd.read_csv(resp_file)
         
-        # Detect header format (old vs new)
         has_new_format = 'timestamp_unix' in df_resp.columns
         
         if has_new_format:
             print(f"    Detected new header format")
-            # New format already has proper timestamps
             if 'timestamp_unix' in df_resp.columns:
                 df_resp['LocalTimestamp'] = df_resp['timestamp_unix']
             elif 'timestamp' in df_resp.columns:
-                # Need to parse ISO timestamp
                 df_resp['LocalTimestamp'] = pd.to_datetime(df_resp['timestamp']).apply(lambda x: x.timestamp())
         else:
             print(f"    Detected old header format")
-            # Old format: convert timestamp to unix
             if 'timestamp' in df_resp.columns:
-                # Check if already numeric (unix) or string (ISO)
                 if pd.api.types.is_numeric_dtype(df_resp['timestamp']):
                     df_resp['LocalTimestamp'] = df_resp['timestamp']
                 else:
                     df_resp['LocalTimestamp'] = pd.to_datetime(df_resp['timestamp']).apply(lambda x: x.timestamp())
         
-        # Calculate timestamp offset
         offset = find_timestamp_offset(df_markers, df_resp)
         
-        # Analyze RR if selected
         if config.get('analyzeRR', True) and 'RR' in df_resp.columns:
             print(f"\n    Analyzing RR (Respiratory Rate)")
             try:
@@ -1369,7 +1310,6 @@ def analyze_respiratory_data(manifest, respiratory_configs, comparison_groups, o
                 import traceback
                 traceback.print_exc()
         
-        # Analyze Force if selected
         if config.get('analyzeForce', True) and 'force' in df_resp.columns:
             print(f"\n    Analyzing Force (Respiratory Effort)")
             try:
@@ -1437,7 +1377,6 @@ def analyze_respiratory_metric(df_resp, metric_col, df_markers, offset, comparis
         metric_col: df_resp[metric_col]
     })
 
-    # Check data sparsity for RR (which is typically measured per breath cycle)
     non_null_count = df_processed[metric_col].notna().sum()
     total_count = len(df_processed)
     sparsity_ratio = non_null_count / total_count if total_count > 0 else 0
@@ -1448,11 +1387,9 @@ def analyze_respiratory_metric(df_resp, metric_col, df_markers, offset, comparis
         print(f"        WARNING: Very sparse data for {metric_col} (<10% non-null values)")
         print(f"        This may affect analysis quality")
 
-   # Apply data cleaning if enabled
     if cleaning_enabled:
         from DataCleaner import BiometricDataCleaner
         
-        # Check if metric is sparse (common for RR which is per-breath, not per-sample)
         non_null_count = df_processed[metric_col].notna().sum()
         total_count = len(df_processed)
         sparsity_ratio = non_null_count / total_count if total_count > 0 else 0
@@ -1473,7 +1410,6 @@ def analyze_respiratory_metric(df_resp, metric_col, df_markers, offset, comparis
                 metric_type = 'RR' if metric_col == 'RR' else 'default'
                 cleaner = BiometricDataCleaner(metric_type=metric_type)
                 
-                # Clean only the valid data
                 df_cleaned = cleaner.clean(
                     df_to_clean,
                     metric_col,
@@ -1481,15 +1417,12 @@ def analyze_respiratory_metric(df_resp, metric_col, df_markers, offset, comparis
                     stages=cleaning_stages
                 )
                 
-                # Merge cleaned values back into original dataframe structure
-                # This preserves the timeline with NaN values intact
                 df_processed.loc[valid_mask, metric_col] = df_cleaned[metric_col].values
                 
                 print(f"        Cleaned {len(df_cleaned)}/{non_null_count} non-null values")
             else:
                 print(f"        No non-null values to clean")
         else:
-            # Continuous data - clean normally
             print(f"        Continuous metric - applying standard cleaning")
             metric_type = 'RR' if metric_col == 'RR' else 'default'
             cleaner = BiometricDataCleaner(metric_type=metric_type)
@@ -1500,13 +1433,11 @@ def analyze_respiratory_metric(df_resp, metric_col, df_markers, offset, comparis
                 stages=cleaning_stages
             )
     
-    # Check if we have any valid data after cleaning
     valid_data_count = df_processed[metric_col].notna().sum()
     if valid_data_count == 0:
         print(f"        WARNING: No valid data available after cleaning")
         return None, []
     
-    # Extract data for each comparison group
     group_data_raw = {}
     
     for group in comparison_groups:
@@ -1521,7 +1452,6 @@ def analyze_respiratory_metric(df_resp, metric_col, df_markers, offset, comparis
         print(f"        No data extracted for any event")
         return None, []
     
-    # Apply analysis method
     group_data_processed = {}
     for group_label, data in group_data_raw.items():
         try:
@@ -1531,26 +1461,22 @@ def analyze_respiratory_metric(df_resp, metric_col, df_markers, offset, comparis
             print(f"        Error processing {group_label}: {e}")
             continue
     
-    # Calculate statistics
     results = {}
     for group_label, data in group_data_processed.items():
         stats = calculate_statistics(data, metric_col, analysis_method)
         results[group_label] = stats
     
-    # Generate plots
     plots = []
     
-    # Use clean metric name for filename, display name for plot title
     metric_name = 'RR' if metric_col == 'RR' else 'Force'
     display_name = 'Respiratory Rate (RR)' if metric_col == 'RR' else 'Respiratory Effort (Force)'
 
-    # Main plot
     if plot_type != 'barchart':
         suffix = f"_resp_{subject_label}_{metric_col}"
         plot = generate_plot(
             group_data_processed,
             metric_col,
-            metric_name,  # ✅ Use clean name for filename: 'RR' or 'Force'
+            metric_name,  
             plot_type,
             analysis_method,
             output_folder,
@@ -1560,7 +1486,6 @@ def analyze_respiratory_metric(df_resp, metric_col, df_markers, offset, comparis
         if plot:
             plots.append(plot)
     
-    # Comparison plot
     if len(group_data_processed) >= 2:
         suffix = f"_resp_{subject_label}_{metric_col}"
         comp_plot = generate_comparison_plot(
@@ -1602,26 +1527,22 @@ def analyze_cardiac_data(manifest, cardiac_configs, comparison_groups, output_fo
     all_results = {}
     all_plots = []
     
-    # Process each subject's cardiac data
     for subject, config in cardiac_configs.items():
         if not config.get('selected', True):
             print(f"  Skipping {subject} (not selected)")
             continue
         
-        # Skip if subject not selected
         if batch_mode and selected_subjects and subject not in selected_subjects:
             print(f"  Skipping {subject} (not in selected subjects)")
             continue
         
         print(f"\n  Subject: {subject}")
         
-        # Load event markers for this subject
         df_markers = load_event_markers_for_subject(manifest, subject, batch_mode)
         if df_markers is None:
             print(f"    No event markers found - skipping")
             continue
         
-        # Find cardiac file for this subject
         cardiac_file = find_cardiac_file_for_subject(manifest, subject)
         if not cardiac_file:
             print(f"    No cardiac file found - skipping")
@@ -1629,23 +1550,18 @@ def analyze_cardiac_data(manifest, cardiac_configs, comparison_groups, output_fo
         
         print(f"    Loading: {os.path.basename(cardiac_file)}")
         
-        # Load cardiac data
         df_cardiac = pd.read_csv(cardiac_file)
         
-        # Cardiac files already have timestamp_unix column
         if 'timestamp_unix' in df_cardiac.columns:
             df_cardiac['LocalTimestamp'] = df_cardiac['timestamp_unix']
         elif 'timestamp' in df_cardiac.columns:
-            # Fallback: parse ISO timestamp
             df_cardiac['LocalTimestamp'] = pd.to_datetime(df_cardiac['timestamp']).apply(lambda x: x.timestamp())
         else:
             print(f"    ERROR: No timestamp column found - skipping")
             continue
         
-        # Calculate timestamp offset
         offset = find_timestamp_offset(df_markers, df_cardiac)
         
-        # Analyze HR if selected
         if config.get('analyzeHR', True) and 'HR' in df_cardiac.columns:
             print(f"\n    Analyzing HR (Heart Rate)")
             try:
@@ -1668,14 +1584,12 @@ def analyze_cardiac_data(manifest, cardiac_configs, comparison_groups, output_fo
                         composite_label = f"{subject} - HR - {group_label}"
                         all_results[composite_label] = stats
 
-                # Always add plots if they exist, regardless of results
                 if plots:
                     all_plots.extend(plots)
                     
             except Exception as e:
                 print(f"      Error analyzing HR: {e}")
         
-        # Analyze HRV if selected
         if config.get('analyzeHRV', True) and 'HRV' in df_cardiac.columns:
             print(f"\n    Analyzing HRV (Heart Rate Variability)")
             try:
@@ -1740,16 +1654,13 @@ def analyze_cardiac_metric(df_cardiac, metric_col, df_markers, offset, compariso
     Returns:
         Tuple of (results_dict, plots_list)
     """
-    # Create standardized structure
     df_processed = pd.DataFrame({
         'LocalTimestamp': df_cardiac['LocalTimestamp'],
         metric_col: df_cardiac[metric_col]
     })
     
-    # Apply data cleaning if enabled
     if cleaning_enabled:
         from DataCleaner import BiometricDataCleaner
-        # Both HR and HRV use HR-type cleaning (physiological ranges)
         metric_type = 'HR'
         cleaner = BiometricDataCleaner(metric_type=metric_type)
         df_processed = cleaner.clean(
@@ -1763,7 +1674,6 @@ def analyze_cardiac_metric(df_cardiac, metric_col, df_markers, offset, compariso
         print(f"        WARNING: All data removed during cleaning")
         return None, []
     
-    # Extract data for each comparison group
     group_data_raw = {}
     
     for group in comparison_groups:
@@ -1778,7 +1688,6 @@ def analyze_cardiac_metric(df_cardiac, metric_col, df_markers, offset, compariso
         print(f"        No data extracted for any event")
         return None, []
     
-    # Apply analysis method
     group_data_processed = {}
     for group_label, data in group_data_raw.items():
         try:
@@ -1788,19 +1697,15 @@ def analyze_cardiac_metric(df_cardiac, metric_col, df_markers, offset, compariso
             print(f"        Error processing {group_label}: {e}")
             continue
     
-    # Calculate statistics
     results = {}
     for group_label, data in group_data_processed.items():
         stats = calculate_statistics(data, metric_col, analysis_method)
         results[group_label] = stats
     
-    # Generate plots
     plots = []
     
-    # Use metric name directly (already clean: 'HR', 'HRV')
     metric_name = metric_col
     
-    # Main plot
     if plot_type != 'barchart':
         suffix = f"_cardiac_{subject_label}_{metric_col}"
         plot = generate_plot(
@@ -1816,7 +1721,6 @@ def analyze_cardiac_metric(df_cardiac, metric_col, df_markers, offset, compariso
         if plot:
             plots.append(plot)
     
-    # Comparison plot
     if len(group_data_processed) >= 2:
         suffix = f"_cardiac_{subject_label}_{metric_col}"
         comp_plot = generate_comparison_plot(

@@ -314,10 +314,8 @@ class BiometricDataCleaner:
         import os
         import glob
         
-        # Construct path to accelerometer files
         subject_folder = os.path.join(upload_folder, subject_id, 'emotibit_data')
         
-        # DEBUG: Print what we're searching for and what exists
         print(f"\n=== MOTION ARTIFACT CLEANING DEBUG ===")
         print(f"Subject ID: {subject_id}")
         print(f"Upload folder: {upload_folder}")
@@ -327,17 +325,16 @@ class BiometricDataCleaner:
         if os.path.exists(subject_folder):
             all_files = os.listdir(subject_folder)
             print(f"Files in folder ({len(all_files)} total):")
-            for f in all_files[:10]:  # Show first 10
+            for f in all_files[:10]:  
                 print(f"  - {f}")
             if len(all_files) > 10:
                 print(f"  ... and {len(all_files) - 10} more")
         print(f"======================================\n")
         
-        # Try multiple pattern variations to find accelerometer files
         patterns = [
-            ('*AX.csv', '*AY.csv', '*AZ.csv'),  # Matches anything ending in AX.csv
-            ('*_AX.csv', '*_AY.csv', '*_AZ.csv'),  # Original pattern
-            ('*_emotibit_ground_truth_AX.csv', '*_emotibit_ground_truth_AY.csv', '*_emotibit_ground_truth_AZ.csv')  # Full pattern
+            ('*AX.csv', '*AY.csv', '*AZ.csv'),  
+            ('*_AX.csv', '*_AY.csv', '*_AZ.csv'),  
+            ('*_emotibit_ground_truth_AX.csv', '*_emotibit_ground_truth_AY.csv', '*_emotibit_ground_truth_AZ.csv')
         ]
         
         ax_files = []
@@ -369,20 +366,16 @@ class BiometricDataCleaner:
         print(f"    AY: {len(ay_df)} samples")
         print(f"    AZ: {len(az_df)} samples")
         
-        # Step 1: Combine accelerometer axes
         combined_accel = self.bang_detect(ax_df, ay_df, az_df, "A")
-        
-        # Step 2: Flag motion artifacts
+    
         flagged_accel = self.flag(combined_accel, "A", upper_threshold, lower_threshold)
         
-        # Count artifacts detected
         artifact_count = (flagged_accel["flag"] == 0).sum()
         total_count = len(flagged_accel)
         artifact_pct = (artifact_count / total_count * 100) if total_count > 0 else 0
         
         print(f"  Motion artifacts detected: {artifact_count}/{total_count} ({artifact_pct:.1f}%)")
         
-        # Step 3: Remove flagged time windows from biometric data
         cleaned_data = self.interval_marking(data_df, flagged_accel, interval_size)
         
         removed = len(data_df) - len(cleaned_data)
