@@ -91,6 +91,7 @@ function AnalysisViewer() {
     remove_physiological_outliers: true,
     remove_statistical_outliers: false,
     remove_sudden_changes: true,
+    remove_motion_artifacts: false,
     interpolate: true,
     smooth: false
   });
@@ -1157,6 +1158,21 @@ function AnalysisViewer() {
       }
     });
 
+    // 2.5. Motion sensor files (for motion artifact cleaning)
+    if (cleaningEnabled && cleaningStages.remove_motion_artifacts) {
+      ['AX', 'AY', 'AZ', 'GX', 'GY', 'GZ'].forEach(sensorType => {
+        fileStructure.emotibitFiles.forEach(emFile => {
+          const isSensorFile = emFile.name.includes(`_${sensorType}.csv`);
+          const belongsToSelected = selectedSubjectsList.some(subject => emFile.path.includes(subject));
+          if (isSensorFile && belongsToSelected && !addedFilePaths.has(emFile.path)) {
+            filesToUpload.push(emFile.file);
+            pathsToUpload.push(emFile.path);
+            addedFilePaths.add(emFile.path);
+          }
+        });
+      });
+    }
+    
     // 3. Respiratory files
     if (fileStructure.respirationFiles && fileStructure.respirationFiles.length > 0) {
       fileStructure.respirationFiles.forEach(respFile => {
@@ -2538,7 +2554,17 @@ function AnalysisViewer() {
                             </div>
                             <span className="recommended-badge">Recommended</span>
                           </label>
-
+                          <label className="cleaning-stage-item" title="Remove time windows with detected motion artifacts from accelerometer data">
+                            <input
+                              type="checkbox"
+                              checked={cleaningStages.remove_motion_artifacts}
+                              onChange={(e) => setCleaningStages({...cleaningStages, remove_motion_artifacts: e.target.checked})}
+                            />
+                            <div className="stage-content">
+                              <strong>Remove Motion Artifacts</strong>
+                              <span className="stage-description">Accelerometer-based detection</span>
+                            </div>
+                          </label>
                           <label className="cleaning-stage-item" title="Fill small gaps in data using linear interpolation">
                             <input
                               type="checkbox"

@@ -528,18 +528,44 @@ def analyze_metric(metric_file, df_markers, comparison_groups, metric,
     print(f"Loading: {os.path.basename(metric_file)}")
     df_metric = pd.read_csv(metric_file)
     print(f"Loaded {df_metric.shape[0]} rows")
-    
+
     # Apply data cleaning if enabled
     if cleaning_enabled:
         from DataCleaner import BiometricDataCleaner
         cleaner = BiometricDataCleaner(metric_type=metric)
-        metric_col = df_metric.columns[-1]  
-        df_metric = cleaner.clean(
-            df_metric, 
-            metric_col, 
-            timestamp_col='LocalTimestamp',
-            stages=cleaning_stages
-        )
+        metric_col = df_metric.columns[-1]
+        
+        # Apply motion artifact cleaning FIRST (if enabled)
+        if cleaning_stages.get('remove_motion_artifacts', False):
+            # Extract subject from metric_file path
+            path_parts = metric_file.split(os.sep)
+            subject_id = None
+            for i, part in enumerate(path_parts):
+                if 'emotibit_data' in part and i > 0:
+                    subject_id = path_parts[i - 1]
+                    break
+            
+            if subject_id:
+                print(f"  Applying motion artifact cleaning for subject: {subject_id}")
+                # Get upload folder (go up from metric_file to find root)
+                upload_folder = os.path.dirname(os.path.dirname(os.path.dirname(metric_file)))
+                
+                df_metric = cleaner.clean_motion_artifacts(
+                    df_metric,
+                    subject_id,
+                    metric_col,
+                    upload_folder=upload_folder
+                )
+        else:
+            print(f"  WARNING: Could not determine subject ID from path, skipping motion artifact cleaning")
+    
+    # Then apply other cleaning stages
+    df_metric = cleaner.clean(
+        df_metric, 
+        metric_col, 
+        timestamp_col='LocalTimestamp',
+        stages=cleaning_stages
+    )
 
     if len(df_metric) == 0:
         print(f"ERROR: All data removed during cleaning")
@@ -694,7 +720,20 @@ def analyze_metric_multi_subject(manifest, selected_subjects, comparison_groups,
         if cleaning_enabled:
             from DataCleaner import BiometricDataCleaner
             cleaner = BiometricDataCleaner(metric_type=metric)
-           
+            
+            # Apply motion artifact cleaning FIRST (if enabled)
+            if cleaning_stages.get('remove_motion_artifacts', False):
+                print(f"  Applying motion artifact cleaning for subject: {subject}")
+                upload_folder = os.path.dirname(os.path.dirname(os.path.dirname(metric_file)))
+                
+                df_metric = cleaner.clean_motion_artifacts(
+                    df_metric,
+                    subject,
+                    metric_col_name,
+                    upload_folder=upload_folder
+                )
+            
+            # Then apply other cleaning stages
             df_metric = cleaner.clean(
                 df_metric,
                 metric_col_name, 

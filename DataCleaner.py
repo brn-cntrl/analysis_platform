@@ -65,7 +65,7 @@ class BiometricDataCleaner:
         df = data.copy()
         original_count = len(df)
         
-        print(f"\n🧹 Cleaning {self.metric_type} data...")
+        print(f"\nCleaning {self.metric_type} data...")
         print(f"  Original: {original_count} samples")
         
         # STAGE 1: Remove invalid values
@@ -86,6 +86,12 @@ class BiometricDataCleaner:
             if self.thresholds['max_change'] is not None:
                 df = self._remove_sudden_changes(df, metric_col, timestamp_col)
         
+        # STAGE 4.5: Remove motion artifacts (if configured)
+        if stages.get('remove_motion_artifacts', False):
+            # This will be called separately with subject context
+            # Just log that it's enabled here
+            print(f"    Motion artifact removal enabled (will be applied with accelerometer data)")
+
         # STAGE 5: Interpolate missing values
         if stages.get('interpolate', True):
             df = self._interpolate_missing(df, metric_col)
@@ -298,3 +304,90 @@ class BiometricDataCleaner:
             return cleaned_data
         else:
             return precleaned_data
+
+    def clean_motion_artifacts(self, data_df, subject_id, metric_col, 
+                           upper_threshold=2.0, lower_threshold=-2.0, 
+                           interval_size=50, upload_folder='data'):
+        """
+        Clean motion artifacts from biometric data using accelerometer signals.
+        """
+        import os
+        import glob
+        
+        # Construct path to accelerometer files
+        subject_folder = os.path.join(upload_folder, subject_id, 'emotibit_data')
+        
+        # DEBUG: Print what we're searching for and what exists
+        print(f"\n=== MOTION ARTIFACT CLEANING DEBUG ===")
+        print(f"Subject ID: {subject_id}")
+        print(f"Upload folder: {upload_folder}")
+        print(f"Subject folder: {subject_folder}")
+        print(f"Folder exists: {os.path.exists(subject_folder)}")
+        
+        if os.path.exists(subject_folder):
+            all_files = os.listdir(subject_folder)
+            print(f"Files in folder ({len(all_files)} total):")
+            for f in all_files[:10]:  # Show first 10
+                print(f"  - {f}")
+            if len(all_files) > 10:
+                print(f"  ... and {len(all_files) - 10} more")
+        print(f"======================================\n")
+        
+        # Try multiple pattern variations to find accelerometer files
+        patterns = [
+            ('*AX.csv', '*AY.csv', '*AZ.csv'),  # Matches anything ending in AX.csv
+            ('*_AX.csv', '*_AY.csv', '*_AZ.csv'),  # Original pattern
+            ('*_emotibit_ground_truth_AX.csv', '*_emotibit_ground_truth_AY.csv', '*_emotibit_ground_truth_AZ.csv')  # Full pattern
+        ]
+        
+        ax_files = []
+        ay_files = []
+        az_files = []
+        
+        for ax_pat, ay_pat, az_pat in patterns:
+            ax_files = glob.glob(os.path.join(subject_folder, ax_pat))
+            ay_files = glob.glob(os.path.join(subject_folder, ay_pat))
+            az_files = glob.glob(os.path.join(subject_folder, az_pat))
+            
+            if ax_files and ay_files and az_files:
+                print(f"  Found accelerometer files using pattern: {ax_pat}")
+                break
+        
+        if not (ax_files and ay_files and az_files):
+            print(f"Warning: Accelerometer files not found for subject {subject_id}")
+            print(f"  Searched in: {subject_folder}")
+            print(f"  Skipping motion artifact cleaning")
+            return data_df
+        
+        # Load accelerometer data
+        ax_df = pd.read_csv(ax_files[0])
+        ay_df = pd.read_csv(ay_files[0])
+        az_df = pd.read_csv(az_files[0])
+        
+        print(f"  Loaded accelerometer data:")
+        print(f"    AX: {len(ax_df)} samples")
+        print(f"    AY: {len(ay_df)} samples")
+        print(f"    AZ: {len(az_df)} samples")
+        
+        # Step 1: Combine accelerometer axes
+        combined_accel = self.bang_detect(ax_df, ay_df, az_df, "A")
+        
+        # Step 2: Flag motion artifacts
+        flagged_accel = self.flag(combined_accel, "A", upper_threshold, lower_threshold)
+        
+        # Count artifacts detected
+        artifact_count = (flagged_accel["flag"] == 0).sum()
+        total_count = len(flagged_accel)
+        artifact_pct = (artifact_count / total_count * 100) if total_count > 0 else 0
+        
+        print(f"  Motion artifacts detected: {artifact_count}/{total_count} ({artifact_pct:.1f}%)")
+        
+        # Step 3: Remove flagged time windows from biometric data
+        cleaned_data = self.interval_marking(data_df, flagged_accel, interval_size)
+        
+        removed = len(data_df) - len(cleaned_data)
+        removed_pct = (removed / len(data_df) * 100) if len(data_df) > 0 else 0
+        
+        print(f"  Removed {removed} samples ({removed_pct:.1f}%) due to motion artifacts")
+        
+        return cleaned_data
