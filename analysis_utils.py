@@ -29,10 +29,9 @@ def prepare_event_markers_timestamps(df):
         print(f"Found 'timestamp_unix' column (NEW format)")
         df['unix_timestamp'] = df['timestamp_unix']
         
-        # Drop invalid timestamps
         before_count = len(df)
         df = df[pd.notna(df['unix_timestamp'])]
-        df = df[df['unix_timestamp'] > 0]  # Unix timestamps must be positive
+        df = df[df['unix_timestamp'] > 0] 
         after_count = len(df)
         
         if before_count > after_count:
@@ -47,19 +46,15 @@ def prepare_event_markers_timestamps(df):
     if 'timestamp' not in df.columns:
         raise ValueError("Event markers file missing timestamp column (expected 'timestamp' or 'timestamp_unix')")
     
-    # Check if timestamp is already unix format (numeric)
     sample_timestamp = df['timestamp'].dropna().iloc[0] if len(df['timestamp'].dropna()) > 0 else None
     
     if sample_timestamp is None:
         raise ValueError("No valid timestamps found in event markers file")
     
-    # Try to detect format
     if isinstance(sample_timestamp, (int, float)):
-        # Already unix timestamp
         print(f"Found 'timestamp' column (numeric unix format)")
         df['unix_timestamp'] = df['timestamp']
     else:
-        # ISO format string - need to convert
         print(f"Found 'timestamp' column (ISO format) - converting to unix_timestamp")
         
         converted_timestamps = []
@@ -72,14 +67,11 @@ def prepare_event_markers_timestamps(df):
                 continue
             
             try:
-                # Handle various ISO formats
                 ts_str = str(ts).strip()
                 
-                # Try parsing with fromisoformat (Python 3.7+)
                 try:
                     dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
                 except:
-                    # Fallback to pd.to_datetime for broader format support
                     dt = pd.to_datetime(ts_str)
                 
                 unix_ts = dt.timestamp()
@@ -91,7 +83,6 @@ def prepare_event_markers_timestamps(df):
         
         df['unix_timestamp'] = converted_timestamps
         
-        # Drop rows with invalid timestamps
         before_count = len(df)
         df = df[pd.notna(df['unix_timestamp'])]
         after_count = len(df)
@@ -184,7 +175,6 @@ def extract_window_data(emotibit_df, event_markers_df, offset, window_config):
     
     event_marker = window_config['eventMarker']
     
-    # SPECIAL CASE: "all" means entire experiment duration
     if event_marker == 'all':
         print(f"Analyzing entire experiment duration")
         return emotibit_df.copy()
@@ -230,7 +220,7 @@ def extract_window_data(emotibit_df, event_markers_df, offset, window_config):
                 (emotibit_df['AdjustedTimestamp'] < end_time)
             ].copy()
             
-        else:  # custom time window
+        else:  
             start_offset = window_config['customStart']
             end_offset = window_config['customEnd']
             
@@ -288,7 +278,6 @@ def get_subject_files(manifest, subject_name):
             subject_name in external_file.get('path', '')):
             subject_files['external_files'].append(external_file)
     
-    # DEBUG: Log what was found
     print(f"\nSubject files for {subject_name}:")
     print(f"- EmotiBit: {len(subject_files['emotibit_files'])} files")
     print(f"- Event markers: {'✓' if subject_files['event_markers'] else '❌ MISSING'}")

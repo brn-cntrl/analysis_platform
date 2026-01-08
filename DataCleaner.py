@@ -51,7 +51,7 @@ class BiometricDataCleaner:
         Returns:
             Cleaned DataFrame
         """
-        # Default: all stages enabled except statistical outliers and smoothing
+
         if stages is None:
             stages = {
                 'remove_invalid': True,
@@ -89,7 +89,6 @@ class BiometricDataCleaner:
         # STAGE 4.5: Remove motion artifacts (if configured)
         if stages.get('remove_motion_artifacts', False):
             # This will be called separately with subject context
-            # Just log that it's enabled here
             print(f"    Motion artifact removal enabled (will be applied with accelerometer data)")
 
         # STAGE 5: Interpolate missing values
@@ -113,13 +112,11 @@ class BiometricDataCleaner:
         """Remove NaN, inf, and negative values (for metrics that must be positive)"""
         before = len(df)
         
-        # Remove NaN
         df = df.dropna(subset=[metric_col])
         
         # Remove infinite values
         df = df[np.isfinite(df[metric_col])]
         
-        # Remove negative values for certain metrics
         if self.metric_type in ['EDA', 'PI', 'PR', 'PG']:
             df = df[df[metric_col] >= 0]
         
@@ -149,7 +146,6 @@ class BiometricDataCleaner:
         """Remove values beyond threshold standard deviations from median"""
         before = len(df)
         
-        # Use median and MAD for robustness
         median = df[metric_col].median()
         mad = np.median(np.abs(df[metric_col] - median))
         
