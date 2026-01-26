@@ -919,7 +919,15 @@ function ExternalConfigStep({
               {Object.keys(selectedExperimentTypes).filter(exp => selectedExperimentTypes[exp]).map(expType => {
                 const config = getExperimentConfig(expType);
                 const data = experimentTypeMap[expType];
-                const isConfigured = config.timestampColumn && config.dataColumns.some(dc => dc.column);
+                
+                // Check if this is a SART experiment
+                const isSart = expType.toLowerCase().includes('sart');
+                
+                // Different validation for SART vs regular files
+                const isConfigured = isSart
+                  ? config.sart_column_mapping && 
+                    ['trial', 'is_target', 'response', 'rt', 'correct'].every(col => config.sart_column_mapping[col])
+                  : config.timestampColumn && config.dataColumns.some(dc => dc.column);
                 
                 return (
                   <div key={expType} className="experiment-summary-item">
