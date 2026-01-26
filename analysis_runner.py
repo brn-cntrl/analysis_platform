@@ -8,6 +8,8 @@ import json
 from datetime import datetime
 import neurokit2 as nk
 
+from sart_analyzer import analyze_sart_files
+
 from analysis_utils import (
     prepare_event_markers_timestamps,
     find_timestamp_offset,
@@ -27,11 +29,11 @@ from plot_generator import (
     generate_comparison_plot
 )
 
-
 def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups, 
                  analysis_method='raw', plot_type='lineplot', analyze_hrv=False, 
                  output_folder='data/outputs', batch_mode=False, selected_subjects=None,
                  external_configs=None, respiratory_configs=None, cardiac_configs=None,
+                 sart_configs=None,
                  analysis_type='inter', cleaning_enabled=False, cleaning_stages=None):
     """
     Main entry point for analysis.
@@ -280,6 +282,66 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
             print()
         except Exception as e:
             error_msg = f"Error analyzing cardiac data: {str(e)}"
+            print(f"ERROR: {error_msg}")
+            results['errors'].append(error_msg)
+            import traceback
+            traceback.print_exc()
+            print()
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # ANALYZE SART DATA FILES
+    # ═══════════════════════════════════════════════════════════════════════════
+    if sart_configs and len(sart_configs) > 0:
+        print(f"4. ANALYZING SART DATA")
+        print("-" * 80)
+        
+        try:
+            # SART analysis for each subject
+            for subject, config in sart_configs.items():
+                if not config.get('selected', True):
+                    print(f"  Skipping {subject} (not selected)")
+                    continue
+                
+                if batch_mode and selected_subjects and subject not in selected_subjects:
+                    print(f"  Skipping {subject} (not in selected subjects)")
+                    continue
+                
+                print(f"\n  Subject: {subject}")
+                
+                # Fix SART file paths using manifest
+                print(f"  DEBUG: Fixing paths for {len(config.get('files', []))} files")
+                for file_info in config.get('files', []):
+                    filename = file_info['filename']
+                    old_path = file_info.get('path', 'NO PATH')
+                    print(f"    Looking for: subject={subject}, filename={filename}")
+                    print(f"    Current path: {old_path}")
+                    
+                    # Find the actual uploaded file path from manifest
+                    found = False
+                    for ext_file in manifest.get('external_files', []):
+                        print(f"      Checking manifest: subject={ext_file.get('subject')}, filename={ext_file.get('filename')}")
+                        if ext_file['subject'] == subject and ext_file['filename'] == filename:
+                            file_info['path'] = ext_file['path']
+                            print(f"    ✓ MATCHED! New path: {ext_file['path']}")
+                            found = True
+                            break
+                    
+                    if not found:
+                        print(f"    ✗ NOT FOUND in manifest!")
+                
+                sart_results, sart_plots = analyze_sart_files(
+                    config,
+                    output_folder,
+                    subject_label=subject
+                )
+                
+                if sart_results:
+                    results['analysis'][f"SART - {subject}"] = sart_results
+                    results['plots'].extend(sart_plots)
+                    print(f"  ✓ SART analysis complete")
+                
+        except Exception as e:
+            error_msg = f"Error analyzing SART data: {str(e)}"
             print(f"ERROR: {error_msg}")
             results['errors'].append(error_msg)
             import traceback
@@ -1006,6 +1068,10 @@ def analyze_external_data(manifest, external_configs, comparison_groups, output_
             continue
         
         for filename, config in files_config.items():
+            if 'sart' in filename.lower() or config.get('is_sart'):
+                print(f"    Skipping {filename} (SART file - handled separately)")
+                continue
+            
             if not config.get('selected', True):
                 print(f"    Skipping {filename} (not selected)")
                 continue
@@ -1111,7 +1177,20 @@ def process_external_file_column(file_path, config, data_col_config, df_markers,
     
     timestamp_format = config.get('timestampFormat', 'seconds')
     
-    if timestamp_format == 'seconds':
+    if timestamp_format == 'sequential':
+        print(f"        Using sequential/trial-based indexing")
+        
+        # Try to use trial column if it exists, otherwise use row index
+        if 'trial' in df.columns:
+            df['UnixTimestamp'] = pd.to_numeric(df['trial'], errors='coerce').fillna(range(len(df)))
+            print(f"        Using 'trial' column as sequence")
+        else:
+            df['UnixTimestamp'] = range(len(df))
+            print(f"        Using row index as sequence")
+        
+        offset = 0  
+
+    elif timestamp_format == 'seconds':
         df['UnixTimestamp'] = df[timestamp_col]
     elif timestamp_format == 'milliseconds':
         df['UnixTimestamp'] = df[timestamp_col] / 1000.0
@@ -1122,6 +1201,13 @@ def process_external_file_column(file_path, config, data_col_config, df_markers,
         'LocalTimestamp': df['UnixTimestamp'],
         data_col: df[data_col]
     })
+    
+    df_processed[data_col] = pd.to_numeric(df_processed[data_col], errors='coerce')
+    df_processed = df_processed.dropna(subset=[data_col])
+    
+    if len(df_processed) == 0:
+        print(f"        ERROR: All values in {data_col} are non-numeric or empty")
+        return None, []
     
     if cleaning_enabled:
         from DataCleaner import BiometricDataCleaner
@@ -1138,8 +1224,6 @@ def process_external_file_column(file_path, config, data_col_config, df_markers,
         print(f"        WARNING: All data removed during cleaning")
         return None, []
     
-    # Calculate timestamp offset (external data might start at different time)
-    # If format is 'seconds' or 'milliseconds', we need to align with event markers
     if timestamp_format in ['seconds', 'milliseconds']:
         first_event_time = df_markers['unix_timestamp'].min()
         first_data_time = df_processed['LocalTimestamp'].min()

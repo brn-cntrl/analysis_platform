@@ -59,6 +59,9 @@ function AnalysisViewer() {
   const [parserLaunchStatus, setParserLaunchStatus] = useState('');
   const [parseLSLStatus, setParseLSLStatus] = useState('');
 
+  const [hasSartData, setHasSartData] = useState(false);
+  const [sartConfigs, setSartConfigs] = useState({});
+
   // Respiratory data state
   const [hasRespiratoryData, setHasRespiratoryData] = useState(false);
   const [subjectsWithRespiratory, setSubjectsWithRespiratory] = useState([]);
@@ -202,13 +205,28 @@ function AnalysisViewer() {
           Object.entries(subjectConfigs).forEach(([filename, config]) => {
             if (config.selected === false) return;
             
-            if (!config.timestampColumn) {
-              issues.push(`External (${subject}/${filename}): No timestamp column selected`);
-            }
+            // Check if this is a SART file by filename
+            const isSartFile = filename.toLowerCase().includes('sart');
             
-            const validDataColumns = config.dataColumns?.filter(dc => dc.column && dc.displayName) || [];
-            if (validDataColumns.length === 0) {
-              issues.push(`External (${subject}/${filename}): No data columns configured`);
+            if (isSartFile) {
+              // SART validation: only check column mapping
+              const mapping = config.sart_column_mapping || {};
+              const requiredCols = ['trial', 'is_target', 'response', 'rt', 'correct'];
+              const missingCols = requiredCols.filter(col => !mapping[col]);
+              
+              if (missingCols.length > 0) {
+                issues.push(`SART (${subject}/${filename}): Missing column mappings: ${missingCols.join(', ')}`);
+              }
+            } else {
+              // Regular external file validation: check timestamp and data columns
+              if (!config.timestampColumn) {
+                issues.push(`External (${subject}/${filename}): No timestamp column selected`);
+              }
+              
+              const validDataColumns = config.dataColumns?.filter(dc => dc.column && dc.displayName) || [];
+              if (validDataColumns.length === 0) {
+                issues.push(`External (${subject}/${filename}): No data columns configured`);
+              }
             }
           });
         }
@@ -266,8 +284,51 @@ function AnalysisViewer() {
     }
     
     console.log('Validation complete. Issues found:', issues);
+
+    // Update SART configs from external configs
+    if (hasExternalFiles && externalConfigs) {
+      const updatedSartConfigs = {};
+      
+      Object.entries(externalConfigs).forEach(([subject, filesConfig]) => {
+        const sartFileConfigs = Object.entries(filesConfig).filter(([filename, config]) => 
+          (config.is_sart || filename.toLowerCase().includes('sart')) && config.selected !== false
+        );
+        
+        console.log(`DEBUG ${subject}: Found ${sartFileConfigs.length} SART files`);
+        sartFileConfigs.forEach(([filename, config]) => {
+          console.log(`  File: ${filename}`);
+          console.log(`  has sart_column_mapping:`, !!config.sart_column_mapping);
+          console.log(`  sart_column_mapping content:`, config.sart_column_mapping);
+          console.log(`  Full config keys:`, Object.keys(config));
+        });
+        
+        if (sartFileConfigs.length > 0) {
+          updatedSartConfigs[subject] = {
+            selected: true,
+            files: sartFileConfigs.map(([filename, config]) => {
+              const fileData = externalFilesBySubject[subject]?.find(f => f.filename === filename);
+              return {
+                filename: filename,
+                path: fileData?.path || '',  
+                display_name: filename,
+                selected: true
+              };
+            }),
+            column_mapping: sartFileConfigs[0][1].sart_column_mapping || {}
+          };
+        }
+      });
+      
+      if (Object.keys(updatedSartConfigs).length > 0) {
+        setSartConfigs(updatedSartConfigs);
+        setHasSartData(true);
+      }
+    }
+    
+    console.log('Validation complete. Issues found:', issues);
+
     setConfigIssues(issues);
-  }, [selectedSubjects, selectedMetrics, selectedEvents, hasExternalFiles, subjectsWithExternal, externalConfigs, hasRespiratoryData, subjectsWithRespiratory, respiratoryConfigs, hasCardiacData, subjectsWithCardiac, cardiacConfigs, subjectAvailability]);
+  }, [selectedSubjects, selectedMetrics, selectedEvents, hasExternalFiles, subjectsWithExternal, externalConfigs, externalFilesBySubject, hasRespiratoryData, subjectsWithRespiratory, respiratoryConfigs, hasCardiacData, subjectsWithCardiac, cardiacConfigs, subjectAvailability]);
 
   useEffect(() => {
     console.log('availableMetrics changed:', availableMetrics);
@@ -849,6 +910,38 @@ function AnalysisViewer() {
           setSubjectsWithCardiac([]);
           setCardiacConfigs({});
         }
+        // Process SART data detection (from external files)
+        if (data.external_data && data.external_data.has_files) {
+          const sartSubjects = [];
+          const initialSartConfigs = {};
+          
+          Object.entries(data.external_data.files_by_subject).forEach(([subject, files]) => {
+            const sartFiles = files.filter(f => 
+              f.filename.toLowerCase().includes('sart') || 
+              f.experiment_name?.toLowerCase().includes('sart')
+            );
+            
+            if (sartFiles.length > 0) {
+              sartSubjects.push(subject);
+              initialSartConfigs[subject] = {
+                selected: true,
+                files: sartFiles.map(f => ({
+                  filename: f.filename,
+                  path: f.path,
+                  display_name: f.filename,
+                  selected: true
+                })),
+                column_mapping: {}
+              };
+            }
+          });
+          
+          if (sartSubjects.length > 0) {
+            setHasSartData(true);
+            setSartConfigs(initialSartConfigs);
+            console.log(`SART data detected for ${sartSubjects.length} subject(s)`);
+          }
+        }
 
         const eventMarkersMsg = data.event_markers && data.event_markers.length > 0 
           ? `, ${data.event_markers.length} event markers` 
@@ -1203,24 +1296,25 @@ function AnalysisViewer() {
     
     if (hasExternalFiles) {
       selectedSubjectsList.forEach(subject => {
-        if (subjectsWithExternal.includes(subject) && externalFilesBySubject[subject]) {
-          externalFilesBySubject[subject].forEach(fileData => {
-            totalExternalFiles++;
-            
-            const fileConfig = externalConfigs[subject]?.[fileData.filename];
-            const isSelected = fileConfig?.selected !== false;
-            
-            if (isSelected) {
-              selectedExternalFiles++;
-              const externalFile = fileStructure.externalFiles.find(f => f.path === fileData.path);
-              if (externalFile && !addedFilePaths.has(externalFile.path)) {
-                filesToUpload.push(externalFile.file);
-                pathsToUpload.push(externalFile.path);
-                addedFilePaths.add(externalFile.path);
-              }
+        const subjectExternalFiles = fileStructure.externalFiles.filter(f => 
+          f.path.includes(`${subject}/external_data/`)
+        );
+        
+        subjectExternalFiles.forEach(externalFile => {
+          totalExternalFiles++;
+          
+          const fileConfig = externalConfigs[subject]?.[externalFile.name];
+          const isSelected = fileConfig?.selected !== false;
+          
+          if (isSelected) {
+            selectedExternalFiles++;
+            if (!addedFilePaths.has(externalFile.path)) {
+              filesToUpload.push(externalFile.file);
+              pathsToUpload.push(externalFile.path);
+              addedFilePaths.add(externalFile.path);
             }
-          });
-        }
+          }
+        });
       });
       
       console.log(`External data: ${selectedExternalFiles}/${totalExternalFiles} files selected`);
@@ -1247,7 +1341,13 @@ function AnalysisViewer() {
 
     // 8a. Add external data config
     if (hasExternalFiles) {
-      formData.append('external_configs', JSON.stringify(externalConfigs));
+      const filteredExternalConfigs = {};
+      selectedSubjectsList.forEach(subject => {
+        if (externalConfigs[subject]) {
+          filteredExternalConfigs[subject] = externalConfigs[subject];
+        }
+      });
+      formData.append('external_configs', JSON.stringify(filteredExternalConfigs));
       formData.append('has_external_data', 'true');
     }
 
@@ -1267,6 +1367,22 @@ function AnalysisViewer() {
       
       const selectedCount = Object.values(cardiacConfigs).filter(c => c.selected).length;
       console.log(`Cardiac data: ${selectedCount} subjects selected`);
+    }
+
+    // 8d. Add SART data config
+    if (hasSartData && Object.keys(sartConfigs).length > 0) {
+      formData.append('sart_configs', JSON.stringify(sartConfigs));
+      formData.append('has_sart_data', 'true');
+      
+      const selectedCount = Object.values(sartConfigs).filter(c => c.selected).length;
+      console.log(`SART data: ${selectedCount} subjects selected`);
+    }
+
+    if (hasSartData && Object.keys(sartConfigs).length > 0) {
+      formData.append('sart_configs', JSON.stringify(sartConfigs));
+      formData.append('has_sart_data', 'true');
+      console.log(`SART data: configs for ${Object.keys(sartConfigs).length} subjects`);
+      console.log('SART CONFIGS BEING SENT:', JSON.stringify(sartConfigs, null, 2));
     }
 
     // 9. Add batch mode parameters

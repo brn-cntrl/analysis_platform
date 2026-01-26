@@ -186,8 +186,15 @@ function ResultsViewer() {
         <div className="result-card">
             <h2 className="card-title">Analysis Results</h2>
             {Object.entries(results.analysis).map(([metric, groupData]) => {
-              // Check if this is a flat structure (Respiratory/External) or nested (EmotiBit)
-              const isFlat = groupData.hasOwnProperty('mean') && groupData.hasOwnProperty('std');
+            // Skip SART results - they have a different structure (summary/by_task/changes)
+            // and are displayed in the Visualizations section instead
+            const isSart = groupData.hasOwnProperty('summary') && groupData.hasOwnProperty('by_task');
+            if (isSart) {
+              return null;
+            }
+            
+            // Check if this is a flat structure (Respiratory/External) or nested (EmotiBit)
+            const isFlat = groupData.hasOwnProperty('mean') && groupData.hasOwnProperty('std');
               
               if (isFlat) {
                 // Flat structure: key is "Respiratory: Subject - RR - baseline", value is stats

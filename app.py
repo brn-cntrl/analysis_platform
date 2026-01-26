@@ -319,6 +319,18 @@ def upload_folder_and_analyze():
             print(f"Failed to parse cardiac data configs: {e}")
             cardiac_configs = {}
 
+    # Parse SART data configs
+    has_sart_data = request.form.get('has_sart_data', 'false') == 'true'
+    sart_configs = {}
+    if has_sart_data:
+        sart_configs_json = request.form.get('sart_configs', '{}')
+        try:
+            sart_configs = json.loads(sart_configs_json)
+            print(f"✓ Parsed SART data configs for {len(sart_configs)} subject(s)")
+        except json.JSONDecodeError as e:
+            print(f"Failed to parse SART data configs: {e}")
+            sart_configs = {}
+
     print(f"\n{'='*80}")
     print(f"ANALYSIS REQUEST RECEIVED")
     print(f"{'='*80}")
@@ -435,12 +447,12 @@ def upload_folder_and_analyze():
             elif 'external_data' in path.lower() and filename_lower.endswith('.csv'):
                 print(f"CLASSIFIED AS EXTERNAL DATA FILE")
                 file_manifest['external_files'].append({
-                    'filename': file.filename,
+                    'filename': os.path.basename(file.filename),
                     'path': file_path,
                     'relative_path': relative_path,
                     'subject': subject_name
                 })
-                print(f"External data file for {subject_name}: {file.filename}")
+                print(f"External data file for {subject_name}: {os.path.basename(file.filename)}")
             else:
                 # ============================================================================
                 # DEBUG: Catch unclassified files
@@ -525,6 +537,7 @@ def upload_folder_and_analyze():
             external_configs=external_configs,
             respiratory_configs=respiratory_configs,
             cardiac_configs=cardiac_configs,
+            sart_configs=sart_configs, 
             analysis_type=analysis_type,
             cleaning_enabled=cleaning_enabled,
             cleaning_stages=cleaning_stages

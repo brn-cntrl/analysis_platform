@@ -480,6 +480,11 @@ function ExternalConfigStep({
                                       checked={isFileSelected}
                                       onChange={(e) => {
                                         updateConfig(subject, fileData.filename, 'selected', e.target.checked);
+                                        
+                                        const isSart = fileData.filename.toLowerCase().includes('sart');
+                                        if (isSart && e.target.checked) {
+                                          updateConfig(subject, fileData.filename, 'is_sart', true);
+                                        }
                                       }}
                                     />
                                     <span>{fileData.filename}</span>
@@ -491,8 +496,48 @@ function ExternalConfigStep({
                         })}
                       </div>
                     </div>
+                    
+                    {/* SART Column Mapping */}
+                    {expType.toLowerCase().includes('sart') && (
+                      <div className="config-subsection" style={{
+                        backgroundColor: '#fff3cd',
+                        border: '2px solid #ffc107',
+                        borderRadius: '8px',
+                        padding: '15px',
+                        marginBottom: '20px'
+                      }}>
+                        <h5 className="subsection-title">📊 SART Column Mapping (Required)</h5>
+                        <p className="subsection-description">
+                          Map columns for trial-based SART analysis. Standard timestamp/data configuration not needed.
+                        </p>
+                        
+                        {['trial', 'is_target', 'response', 'rt', 'correct'].map(reqCol => {
+                          const currentMapping = config.sart_column_mapping || {};
+                          return (
+                            <div key={reqCol} className="data-column-row" style={{ marginBottom: '10px' }}>
+                              <label style={{ minWidth: '120px', fontWeight: 'bold' }}>{reqCol}:</label>
+                              <select
+                                value={currentMapping[reqCol] || ''}
+                                onChange={(e) => {
+                                  updateExperimentConfig(expType, 'sart_column_mapping', {
+                                    ...currentMapping,
+                                    [reqCol]: e.target.value
+                                  });
+                                }}
+                                className="external-select"
+                              >
+                                <option value="">Select column...</option>
+                                {sampleFile.columns.map(col => (
+                                  <option key={col} value={col}>{col}</option>
+                                ))}
+                              </select>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
 
-                    {data.hasMatchingStructure ? (
+                    {data.hasMatchingStructure && !expType.toLowerCase().includes('sart') ? (
                       <>
                         {/* Timestamp Configuration */}
                         <div className="config-subsection">
@@ -545,6 +590,16 @@ function ExternalConfigStep({
                                     onChange={(e) => updateExperimentConfig(expType, 'timestampFormat', e.target.value)}
                                   />
                                   <span>Unix timestamp</span>
+                                </label>
+                                <label className="format-option">
+                                  <input
+                                    type="radio"
+                                    name={`timestampFormat-${expType}`}
+                                    value="sequential"
+                                    checked={config.timestampFormat === 'sequential'}
+                                    onChange={(e) => updateExperimentConfig(expType, 'timestampFormat', e.target.value)}
+                                  />
+                                  <span>Sequential (trial/row number)</span>
                                 </label>
                               </div>
                             </div>
@@ -785,6 +840,12 @@ function ExternalConfigStep({
                             const isFileSelected = fileConfig.selected !== false;
                             
                             if (!isFileSelected) return null;
+                            
+                            // Check if this is a SART file
+                            const isSartFile = fileData.filename.toLowerCase().includes('sart');
+                            
+                            // Skip timestamp/data column config for SART files
+                            if (isSartFile) return null;
                             
                             return (
                               <div key={`${subject}-${fileData.filename}`} className="individual-file-config">
