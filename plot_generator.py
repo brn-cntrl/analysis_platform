@@ -26,7 +26,8 @@ def generate_plot(group_data, metric_col, metric, plot_type, analysis_method,
 
 def generate_lineplot(group_data, metric_col, metric, analysis_method, output_folder, suffix='', subject_label=''):    
     """
-    Generate line plot (time series) - preserves existing styling.
+    Generate line plot (time series)
+    NOTE: Keep analysis_method parameter for future work.
     """
     colors = ['#4CAF50', '#2196F3', '#FF9800', '#9C27B0', '#F44336', 
               '#00BCD4', '#FFEB3B', '#795548', '#607D8B', '#E91E63']
@@ -97,9 +98,10 @@ def generate_lineplot(group_data, metric_col, metric, analysis_method, output_fo
     }
 
 
-def generate_boxplot(group_data, metric_col, metric, analysis_method, output_folder, suffix='', subject_label=''):    
+def generate_boxplot(group_data, metric_col, metric, analysis_method, output_folder, suffix='', subject_label=''): 
     """
     Generate box plot for distribution comparison.
+    NOTE: Keep analysis_method parameter for future work.
     """
     colors = ['#4CAF50', '#2196F3', '#FF9800', '#9C27B0', '#F44336', 
               '#00BCD4', '#FFEB3B', '#795548', '#607D8B', '#E91E63']
@@ -113,7 +115,6 @@ def generate_boxplot(group_data, metric_col, metric, analysis_method, output_fol
         values = group_data[group_label][metric_col].dropna().values
         data_arrays.append(values)
     
-    # Create box plot
     try:
         bp = ax.boxplot(data_arrays, labels=group_labels, patch_artist=True,
                         notch=True, showmeans=True,
@@ -127,7 +128,6 @@ def generate_boxplot(group_data, metric_col, metric, analysis_method, output_fol
                         meanprops=dict(marker='D', markerfacecolor='red', markersize=8),
                         medianprops=dict(color='black', linewidth=2))
     
-    # Color the boxes
     for patch, color in zip(bp['boxes'], colors[:len(group_labels)]):
         patch.set_facecolor(color)
         patch.set_alpha(0.7)
@@ -143,7 +143,6 @@ def generate_boxplot(group_data, metric_col, metric, analysis_method, output_fol
     
     plt.tight_layout()
     
-    # Add subject label at bottom if provided
     if subject_label:
         fig.text(0.5, 0.01, f"Subject: {subject_label}", 
                 ha='center', fontsize=10, style='italic', transform=fig.transFigure)
@@ -167,7 +166,6 @@ def generate_scatter(group_data, metric_col, metric, analysis_method, output_fol
     """
     Generate scatter plot showing data point distribution.
     """
-    # Scatter plots require multiple data points - incompatible with mean analysis
     if analysis_method == 'mean':
         print(f"Scatter plot requires multiple data points (mean analysis produces single value)")
         return None
@@ -189,7 +187,6 @@ def generate_scatter(group_data, metric_col, metric, analysis_method, output_fol
         
         color = colors[idx % len(colors)]
         
-        # Scatter plot with jitter for better visibility
         ax.scatter(elapsed_seconds, values, 
                   color=color, s=40, alpha=0.6, 
                   label=group_label, edgecolors='black', linewidths=0.5)
@@ -208,7 +205,6 @@ def generate_scatter(group_data, metric_col, metric, analysis_method, output_fol
     ax.grid(True, alpha=0.3, linestyle='--')
     plt.tight_layout()
     
-    # Add subject label at bottom if provided
     if subject_label:
         fig.text(0.5, 0.01, f"Subject: {subject_label}", 
                 ha='center', fontsize=10, style='italic', transform=fig.transFigure)
@@ -230,8 +226,9 @@ def generate_scatter(group_data, metric_col, metric, analysis_method, output_fol
 
 def generate_poincare(group_data, metric_col, metric, analysis_method, output_folder, suffix='', subject_label=''):
     """
-    Generate Poincaré plot (n vs n+1 values) for variability analysis.
-    Particularly useful for HRV and successive difference analysis.
+    Generate Poincaré plot for variability analysis.
+    Used for HRV and successive difference analysis.
+    NOTE: Keep analysis_method parameter for future work.
     """
     colors = ['#4CAF50', '#2196F3', '#FF9800', '#9C27B0', '#F44336', 
               '#00BCD4', '#FFEB3B', '#795548', '#607D8B', '#E91E63']
@@ -244,7 +241,6 @@ def generate_poincare(group_data, metric_col, metric, analysis_method, output_fo
         if len(values) < 2:
             continue
         
-        # Create n vs n+1 pairs
         x = values[:-1]
         y = values[1:]
         
@@ -253,18 +249,16 @@ def generate_poincare(group_data, metric_col, metric, analysis_method, output_fo
         ax.scatter(x, y, color=color, s=30, alpha=0.6, 
                   label=group_label, edgecolors='black', linewidths=0.3)
         
-        # Calculate SD1 and SD2 (Poincaré plot parameters)
         sd1 = np.std(np.subtract(x, y)) / np.sqrt(2.0)
         sd2 = np.std(np.add(x, y)) / np.sqrt(2.0)
         
-        # Add to label
         ax.plot([], [], ' ', label=f'{group_label}: SD1={sd1:.2f}, SD2={sd2:.2f}')
     
-    # Add identity line
     lims = [
         np.min([ax.get_xlim(), ax.get_ylim()]),
         np.max([ax.get_xlim(), ax.get_ylim()])
     ]
+
     ax.plot(lims, lims, 'k--', alpha=0.3, zorder=0, label='Identity Line')
     
     ax.set_xlabel(f'{metric} at time n', fontsize=12)
@@ -275,7 +269,6 @@ def generate_poincare(group_data, metric_col, metric, analysis_method, output_fo
     ax.set_aspect('equal')
     plt.tight_layout()
     
-    # Add subject label at bottom if provided
     if subject_label:
         fig.text(0.5, 0.01, f"Subject: {subject_label}", 
                 ha='center', fontsize=10, style='italic', transform=fig.transFigure)
@@ -298,6 +291,7 @@ def generate_poincare(group_data, metric_col, metric, analysis_method, output_fo
 def generate_comparison_plot(metric_results, metric, analysis_method, output_folder, suffix='', subject_label=''):
     """
     Generate comparison bar chart - preserves existing styling.
+    NOTE: Keep analysis_method parameter for future work.
     """
     colors = ['#4CAF50', '#2196F3', '#FF9800', '#9C27B0', '#F44336', 
               '#00BCD4', '#FFEB3B', '#795548', '#607D8B', '#E91E63']
@@ -306,7 +300,6 @@ def generate_comparison_plot(metric_results, metric, analysis_method, output_fol
     
     group_labels = list(metric_results.keys())
     
-    # Truncate long labels for display
     display_labels = []
     for label in group_labels:
         if len(label) > 15:
@@ -323,19 +316,18 @@ def generate_comparison_plot(metric_results, metric, analysis_method, output_fol
                 alpha=0.7, edgecolor='black', linewidth=1.5)
     
     ax.set_xticks(x_pos)
-    ax.set_xticklabels(display_labels, rotation=0, ha='center')  # ✅ FIXED: Using display_labels
+    ax.set_xticklabels(display_labels, rotation=0, ha='center')  
     ax.set_ylabel(f'{metric} Value', fontsize=12)
     ax.set_title(f'{metric}: Statistical Comparison', fontsize=14, fontweight='bold')
     ax.grid(True, alpha=0.3, axis='y', linestyle='--')
     
-    # Add value labels on bars
+    
     for i, (mean, std) in enumerate(zip(means, stds)):
         ax.text(i, mean + std + 0.05 * max(means), f'{mean:.2f}±{std:.2f}',
             ha='center', va='bottom', fontsize=9, fontweight='bold')
     
     plt.tight_layout()
     
-    # Add subject label at bottom if provided
     if subject_label:
         fig.text(0.5, 0.01, f"Subject: {subject_label}", 
                 ha='center', fontsize=10, style='italic', transform=fig.transFigure)

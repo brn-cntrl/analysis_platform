@@ -22,9 +22,7 @@ def prepare_event_markers_timestamps(df):
     """
     df = df.copy()
     
-    # ═══════════════════════════════════════════════════════════
     # NEW STRUCTURE: Check for timestamp_unix column
-    # ═══════════════════════════════════════════════════════════
     if 'timestamp_unix' in df.columns:
         print(f"Found 'timestamp_unix' column (NEW format)")
         df['unix_timestamp'] = df['timestamp_unix']
@@ -40,9 +38,7 @@ def prepare_event_markers_timestamps(df):
         print(f"Using {after_count} valid unix timestamps")
         return df
     
-    # ═══════════════════════════════════════════════════════════
     # OLD STRUCTURE: Check for timestamp column
-    # ═══════════════════════════════════════════════════════════
     if 'timestamp' not in df.columns:
         raise ValueError("Event markers file missing timestamp column (expected 'timestamp' or 'timestamp_unix')")
     
@@ -280,7 +276,7 @@ def get_subject_files(manifest, subject_name):
     
     print(f"\nSubject files for {subject_name}:")
     print(f"- EmotiBit: {len(subject_files['emotibit_files'])} files")
-    print(f"- Event markers: {'✓' if subject_files['event_markers'] else '❌ MISSING'}")
+    print(f"- Event markers: {'FOUND' if subject_files['event_markers'] else 'MISSING'}")
     print(f"- External data: {len(subject_files['external_files'])} files")
     
     return subject_files

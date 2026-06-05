@@ -26,21 +26,17 @@ def analyze_sart_files(sart_configs, output_folder, subject_label='', upload_fol
     files_data = sart_configs.get('files', [])
     column_mapping = sart_configs.get('column_mapping', {})
     
-    # Resolve relative paths to absolute paths
     for file_info in files_data:
         path = file_info.get('path', '')
         if path and not os.path.isabs(path):
-            # Convert relative path to absolute
             file_info['path'] = os.path.join(upload_folder, path) if upload_folder else path
     
-    # Required column mappings
     required_cols = ['trial', 'is_target', 'response', 'rt', 'correct']
     for col in required_cols:
         if col not in column_mapping or not column_mapping[col]:
             print(f"ERROR: Missing column mapping for '{col}'")
             return None, []
     
-    # Load SART files in order
     sart_data = []
     sart_names = []
     
@@ -50,8 +46,6 @@ def analyze_sart_files(sart_configs, output_folder, subject_label='', upload_fol
             
         try:
             df = pd.read_csv(file_info['path'])
-            
-            # Map columns to standard names
             df_mapped = pd.DataFrame({
                 'trial': df[column_mapping['trial']],
                 'is_target': df[column_mapping['is_target']],
@@ -60,7 +54,6 @@ def analyze_sart_files(sart_configs, output_folder, subject_label='', upload_fol
                 'correct': df[column_mapping['correct']]
             })
             
-            # Convert is_target to boolean - handle multiple formats
             is_target_col = df_mapped['is_target']
             if is_target_col.dtype == 'object':
                 # Try string conversion first
@@ -69,7 +62,6 @@ def analyze_sart_files(sart_configs, output_folder, subject_label='', upload_fol
                     'False': False, 'false': False, 'FALSE': False, '0': False, 0: False
                 })
             elif pd.api.types.is_numeric_dtype(is_target_col):
-                # Numeric: treat 1 as True, 0 as False
                 df_mapped['is_target'] = is_target_col.astype(bool)
 
             # Fill any remaining NaN with False (assume Go trials)
@@ -86,8 +78,7 @@ def analyze_sart_files(sart_configs, output_folder, subject_label='', upload_fol
     if len(sart_data) == 0:
         print("No valid SART files loaded")
         return None, []
-    
-    # Analyze and plot
+
     results = plot_sart_changes(
         sart_data, 
         sart_names, 
@@ -138,7 +129,6 @@ def plot_sart_changes(sart_data, sart_names, output_folder, subject_label=''):
             'nogo_trials_count': len(nogo_trials)
         }
     
-    # Calculate metrics for each file
     go_rt_values = []
     go_accuracy_values = []
     nogo_accuracy_values = []
@@ -149,7 +139,6 @@ def plot_sart_changes(sart_data, sart_names, output_folder, subject_label=''):
         go_accuracy_values.append(metrics['go_accuracy'])
         nogo_accuracy_values.append(metrics['nogo_accuracy'])
     
-    # Create DataFrame for plotting
     plot_data = pd.DataFrame({
         'task': sart_names,
         'go_response_time': go_rt_values,
@@ -158,12 +147,10 @@ def plot_sart_changes(sart_data, sart_names, output_folder, subject_label=''):
         'task_number': range(len(sart_names))
     })
     
-    # Set seaborn style
     sns.set_style("whitegrid")
     sns.set_palette("muted")
     sns.set_context("notebook", font_scale=1.1)
     
-    # Create visualization (EXACT styling from original)
     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(18, 12))
     palette = sns.color_palette("husl", 3)
     
@@ -271,7 +258,6 @@ def plot_sart_changes(sart_data, sart_names, output_folder, subject_label=''):
         fig.text(0.5, 0.01, f"Subject: {subject_label}", 
                 ha='center', fontsize=10, style='italic', transform=fig.transFigure)
     
-    # Save plot
     suffix = f"_{subject_label}" if subject_label else ""
     filename = f'SART_performance_changes{suffix}.png'
     plot_path = os.path.join(output_folder, filename)

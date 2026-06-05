@@ -33,7 +33,10 @@ class BiometricDataCleaner:
               stages=None):
         """
         Main cleaning pipeline with configurable stages.
-        
+
+        NOTE: Motion artifact cleaning and interp based on approach developed
+        in Dr. Chiba's lab
+
         Args:
             data: DataFrame with biometric data
             metric_col: Name of column with values
@@ -89,7 +92,7 @@ class BiometricDataCleaner:
         # STAGE 4.5: Remove motion artifacts (if configured)
         if stages.get('remove_motion_artifacts', False):
             # This will be called separately with subject context
-            print(f"    Motion artifact removal enabled (will be applied with accelerometer data)")
+            print(f"Motion artifact removal enabled (will be applied with accelerometer data)")
 
         # STAGE 5: Interpolate missing values
         if stages.get('interpolate', True):
@@ -122,7 +125,7 @@ class BiometricDataCleaner:
         
         removed = before - len(df)
         if removed > 0:
-            print(f"    Removed {removed} invalid values (NaN/inf/negative)")
+            print(f"Removed {removed} invalid values (NaN/inf/negative)")
         
         return df
     
@@ -138,7 +141,7 @@ class BiometricDataCleaner:
         
         removed = before - len(df)
         if removed > 0:
-            print(f"    Removed {removed} physiological outliers (range: {self.thresholds['min']}-{self.thresholds['max']})")
+            print(f"Removed {removed} physiological outliers (range: {self.thresholds['min']}-{self.thresholds['max']})")
         
         return df
     
@@ -161,7 +164,7 @@ class BiometricDataCleaner:
         
         removed = before - len(df)
         if removed > 0:
-            print(f"    Removed {removed} statistical outliers (modified z-score > {threshold})")
+            print(f"Removed {removed} statistical outliers (modified z-score > {threshold})")
         
         return df
     
@@ -184,7 +187,7 @@ class BiometricDataCleaner:
         
         removed = before - len(df)
         if removed > 0:
-            print(f"    Removed {removed} sudden changes (rate > {max_change}/sec)")
+            print(f"Removed {removed} sudden changes (rate > {max_change}/sec)")
         
         return df
     
@@ -219,8 +222,7 @@ class BiometricDataCleaner:
         
         return df
 
-    def bang_detect(self, x, y, z, type):
-        # initialize and combine all
+    def bang_detect(self, x, y, z, type): # NOTE: Based on approach from Chiba's lab
         df = pd.DataFrame()
         df["LocalTimestamp"] = x["LocalTimestamp"]
         df[f"{type}X"] = x[f"{type}X"]
@@ -241,14 +243,14 @@ class BiometricDataCleaner:
         n = len(df)
 
         while i < n:
-            if in_range(df.iloc[i]): # if within thresholds
-                while i < n and in_range(df.iloc[i]): # while signal continues to be within the thresholds
-                    flags.append(1)  # flag as 1
-                    i += 1 # go to next row
-            else: # if not within thresholds
-                while i < n and not in_range(df.iloc[i]): # while 20 rows down is not within thresholds
-                    flags.append(0) # flag as 0
-                    i += 1 # move to next row
+            if in_range(df.iloc[i]): 
+                while i < n and in_range(df.iloc[i]): 
+                    flags.append(1)  
+                    i += 1
+            else: 
+                while i < n and not in_range(df.iloc[i]): 
+                    flags.append(0) 
+                    i += 1 
 
         df["flag"] = flags
 
@@ -343,7 +345,7 @@ class BiometricDataCleaner:
             az_files = glob.glob(os.path.join(subject_folder, az_pat))
             
             if ax_files and ay_files and az_files:
-                print(f"  Found accelerometer files using pattern: {ax_pat}")
+                print(f"Found accelerometer files using pattern: {ax_pat}")
                 break
         
         if not (ax_files and ay_files and az_files):
@@ -357,10 +359,10 @@ class BiometricDataCleaner:
         ay_df = pd.read_csv(ay_files[0])
         az_df = pd.read_csv(az_files[0])
         
-        print(f"  Loaded accelerometer data:")
-        print(f"    AX: {len(ax_df)} samples")
-        print(f"    AY: {len(ay_df)} samples")
-        print(f"    AZ: {len(az_df)} samples")
+        print(f"Loaded accelerometer data:")
+        print(f"  AX: {len(ax_df)} samples")
+        print(f"  AY: {len(ay_df)} samples")
+        print(f"  AZ: {len(az_df)} samples")
         
         combined_accel = self.bang_detect(ax_df, ay_df, az_df, "A")
     
@@ -370,13 +372,13 @@ class BiometricDataCleaner:
         total_count = len(flagged_accel)
         artifact_pct = (artifact_count / total_count * 100) if total_count > 0 else 0
         
-        print(f"  Motion artifacts detected: {artifact_count}/{total_count} ({artifact_pct:.1f}%)")
+        print(f"Motion artifacts detected: {artifact_count}/{total_count} ({artifact_pct:.1f}%)")
         
         cleaned_data = self.interval_marking(data_df, flagged_accel, interval_size)
         
         removed = len(data_df) - len(cleaned_data)
         removed_pct = (removed / len(data_df) * 100) if len(data_df) > 0 else 0
         
-        print(f"  Removed {removed} samples ({removed_pct:.1f}%) due to motion artifacts")
+        print(f"Removed {removed} samples ({removed_pct:.1f}%) due to motion artifacts")
         
         return cleaned_data

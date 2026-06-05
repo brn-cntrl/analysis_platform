@@ -196,10 +196,7 @@ def extract_lsl_markers():
 
 @app.route('/api/upload-folder-and-analyze', methods=['POST'])
 def upload_folder_and_analyze():
-    
-    # ============================================================================
     # DEBUG: Log incoming request
-    # ============================================================================
     print("\n" + "="*80)
     print("UPLOAD AND ANALYZE REQUEST")
     print("="*80)
@@ -252,13 +249,12 @@ def upload_folder_and_analyze():
         try:
             external_configs = json.loads(external_configs_json)
             
-            # Count selected vs total files
             total_files = 0
             selected_files = 0
             for subject, files_config in external_configs.items():
                 for filename, config in files_config.items():
                     total_files += 1
-                    if config.get('selected', True):  # Default to True if not specified
+                    if config.get('selected', True): 
                         selected_files += 1
             
             print(f"Parsed external data configs for {len(external_configs)} subjects")
@@ -296,7 +292,7 @@ def upload_folder_and_analyze():
             respiratory_configs = json.loads(respiratory_configs_json)
             
             selected_count = sum(1 for config in respiratory_configs.values() if config.get('selected', True))
-            print(f"✓ Parsed respiratory data configs for {len(respiratory_configs)} subjects")
+            print(f"Parsed respiratory data configs for {len(respiratory_configs)} subjects")
             print(f"  Selected for analysis: {selected_count} subjects")
             
         except json.JSONDecodeError as e:
@@ -312,7 +308,7 @@ def upload_folder_and_analyze():
             cardiac_configs = json.loads(cardiac_configs_json)
             
             selected_count = sum(1 for config in cardiac_configs.values() if config.get('selected', True))
-            print(f"✓ Parsed cardiac data configs for {len(cardiac_configs)} subjects")
+            print(f"Parsed cardiac data configs for {len(cardiac_configs)} subjects")
             print(f"  Selected for analysis: {selected_count} subjects")
             
         except json.JSONDecodeError as e:
@@ -326,7 +322,7 @@ def upload_folder_and_analyze():
         sart_configs_json = request.form.get('sart_configs', '{}')
         try:
             sart_configs = json.loads(sart_configs_json)
-            print(f"✓ Parsed SART data configs for {len(sart_configs)} subject(s)")
+            print(f"Parsed SART data configs for {len(sart_configs)} subject(s)")
         except json.JSONDecodeError as e:
             print(f"Failed to parse SART data configs: {e}")
             sart_configs = {}
@@ -365,7 +361,7 @@ def upload_folder_and_analyze():
             'label': label,
             'eventMarker': event_marker,
             'conditionMarker': condition_marker if condition_marker != 'all' else '',
-            'timeWindowType': 'full',  # Default to full window
+            'timeWindowType': 'full',  
             'customStart': 0,
             'customEnd': 0
         }
@@ -404,7 +400,6 @@ def upload_folder_and_analyze():
             
             filename_lower = file.filename.lower()
             
-            # Extract subject from path (format: root/subject_xxx/...)
             path_parts = path.split('/')
             subject_name = path_parts[1] if len(path_parts) >= 3 else None
             
@@ -454,9 +449,7 @@ def upload_folder_and_analyze():
                 })
                 print(f"External data file for {subject_name}: {os.path.basename(file.filename)}")
             else:
-                # ============================================================================
                 # DEBUG: Catch unclassified files
-                # ============================================================================
                 print(f"UNCLASSIFIED - adding to other_files")
                 file_manifest['other_files'].append({
                     'filename': file.filename,
@@ -484,9 +477,7 @@ def upload_folder_and_analyze():
         print(f"Files organized in: {upload_folder}")
         print(f"Event markers file: {file_manifest['event_markers']}")
 
-        # ============================================================================
         # VALIDATION: Check analysis method and plot type compatibility
-        # ============================================================================
         incompatible_combinations = {
             'mean': ['lineplot', 'scatter', 'boxplot', 'poincare'],  # Mean is single value
             'rmssd': ['poincare'],  # RMSSD transforms data, incompatible with n vs n+1 Poincaré
@@ -504,9 +495,7 @@ def upload_folder_and_analyze():
                 print(f"VALIDATION ERROR: {error_msg}")
                 return jsonify({'error': error_msg}), 400
         
-        # ============================================================================
         # DEBUG: Print manifest summary
-        # ============================================================================
         print("\nMANIFEST SUMMARY:")
         print(f"EmotiBit files: {len(file_manifest['emotibit_files'])}")
         print(f"External files: {len(file_manifest.get('external_files', []))}")
@@ -669,7 +658,7 @@ def scan_folder_data():
     and handles external data paths (no files uploaded).
     """
     try:
-        # --- EmotiBit filenames ---
+        # EmotiBit filenames 
         emotibit_filenames_json = request.form.get('emotibit_filenames')
         if not emotibit_filenames_json:
             return jsonify({'error': 'No emotibit filenames provided'}), 400
@@ -677,7 +666,7 @@ def scan_folder_data():
         emotibit_filenames = json.loads(emotibit_filenames_json)
         print(f"Scanning {len(emotibit_filenames)} EmotiBit files")
         
-        # --- Detected subjects (batch mode) ---
+        # Detected subjects (batch mode) 
         detected_subjects_json = request.form.get('detected_subjects')
         detected_subjects = json.loads(detected_subjects_json) if detected_subjects_json else []
         if detected_subjects:
@@ -696,8 +685,8 @@ def scan_folder_data():
                 for file_data in files:
                     print(f"    - {file_data['filename']}: {len(file_data.get('columns', []))} columns")
 
-        # --- Process respiratory data files ---
-        # --- Process respiratory data files ---
+        # Process respiratory data files 
+        # Process respiratory data files 
         respiratory_filenames_json = request.form.get('respiratory_filenames')
         respiratory_files_by_subject = {}
         
@@ -707,6 +696,7 @@ def scan_folder_data():
             
             for filepath in respiratory_filenames:
                 parts = filepath.split('/')
+
                 # Expected format: root_folder/subject_name/respiratory_data/filename.csv
                 if len(parts) >= 3:
                     subject = parts[1]
@@ -725,7 +715,7 @@ def scan_folder_data():
                 for subject, files in respiratory_files_by_subject.items():
                     print(f"  Subject {subject}: {len(files)} respiratory file(s)")
 
-        # --- Process cardiac data files ---
+        # Process cardiac data files
         cardiac_filenames_json = request.form.get('cardiac_filenames')
         cardiac_files_by_subject = {}
         
@@ -735,6 +725,7 @@ def scan_folder_data():
             
             for filepath in cardiac_filenames:
                 parts = filepath.split('/')
+
                 # Expected format: root_folder/subject_name/cardiac_data/filename.csv
                 if len(parts) >= 3:
                     subject = parts[1]
@@ -753,7 +744,7 @@ def scan_folder_data():
                 for subject, files in cardiac_files_by_subject.items():
                     print(f"  Subject {subject}: {len(files)} cardiac file(s)")
 
-        # --- Process EmotiBit metrics and event markers ---
+        # Process EmotiBit metrics and event markers 
         exclude_tags = {'timesyncs', 'timesyncmap'}
         subject_availability = {}
         if detected_subjects:
@@ -939,9 +930,7 @@ def test_timestamp_matching():
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             file.save(file_path)
             
-            # ============================================================================
-            # DEBUG: Print every file being processed
-            # ============================================================================
+            # DEBUG
             print(f"\n🔍 Processing file:")
             print(f"   Filename: {file.filename}")
             print(f"   Path: {path}")

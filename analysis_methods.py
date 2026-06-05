@@ -1,6 +1,5 @@
 import pandas as pd
 import numpy as np
-from scipy import signal
 
 def apply_analysis_method(data, metric_col, method='raw', **kwargs):
     """
@@ -111,7 +110,7 @@ def apply_rmssd(data, metric_col):
     rmssd_value = np.sqrt(np.mean(squared_diffs))
     
     # Store successive differences as the transformed metric
-    # Note: This will have one less data point than original
+    # Note: This will have one less data point than original. Check validity of the approach
     result = result.iloc[:-1].copy()  # Remove last row to match diff length
     result[metric_col] = successive_diffs
     

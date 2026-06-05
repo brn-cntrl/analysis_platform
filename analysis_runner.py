@@ -202,7 +202,7 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
                     results['analysis'][f"External: {data_label}"] = stats
                 
                 results['plots'].extend(external_plots)
-                print(f"  ✓ Analyzed {len(external_results)} external data series")
+                print(f"Analyzed {len(external_results)} external data series")
             
             print()
         except Exception as e:
@@ -240,7 +240,7 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
                     results['analysis'][f"Respiratory: {metric_label}"] = stats
                 
                 results['plots'].extend(respiratory_plots)
-                print(f"  ✓ Analyzed {len(respiratory_results)} respiratory metrics")
+                print(f"Analyzed {len(respiratory_results)} respiratory metrics")
             
             print()
         except Exception as e:
@@ -277,7 +277,7 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
                     results['analysis'][f"Cardiac: {metric_label}"] = stats
                 
                 results['plots'].extend(cardiac_plots)
-                print(f"  ✓ Analyzed {len(cardiac_results)} cardiac metrics")
+                print(f"Analyzed {len(cardiac_results)} cardiac metrics")
             
             print()
         except Exception as e:
@@ -319,15 +319,15 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
                     # Find the actual uploaded file path from manifest
                     found = False
                     for ext_file in manifest.get('external_files', []):
-                        print(f"      Checking manifest: subject={ext_file.get('subject')}, filename={ext_file.get('filename')}")
+                        print(f"Checking manifest: subject={ext_file.get('subject')}, filename={ext_file.get('filename')}")
                         if ext_file['subject'] == subject and ext_file['filename'] == filename:
                             file_info['path'] = ext_file['path']
-                            print(f"    ✓ MATCHED! New path: {ext_file['path']}")
+                            print(f"MATCHED. New path: {ext_file['path']}")
                             found = True
                             break
                     
                     if not found:
-                        print(f"    ✗ NOT FOUND in manifest!")
+                        print(f"NOT FOUND in manifest.")
                 
                 sart_results, sart_plots = analyze_sart_files(
                     config,
@@ -338,7 +338,7 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
                 if sart_results:
                     results['analysis'][f"SART - {subject}"] = sart_results
                     results['plots'].extend(sart_plots)
-                    print(f"  ✓ SART analysis complete")
+                    print(f"SART analysis complete")
                 
         except Exception as e:
             error_msg = f"Error analyzing SART data: {str(e)}"
@@ -365,9 +365,7 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
             print("-" * 40)
             
             try:
-                # ═══════════════════════════════════════════════════════════
                 # MULTI-SUBJECT HANDLING
-                # ═══════════════════════════════════════════════════════════
                 if batch_mode and selected_subjects and len(selected_subjects) >= 1:
                     
                     # INTRA-SUBJECT: Compare subjects together
@@ -449,9 +447,7 @@ def run_analysis(upload_folder, manifest, selected_metrics, comparison_groups,
                             
                             print()  
                 
-                # ═══════════════════════════════════════════════════════════
                 # SINGLE SUBJECT MODE (ORIGINAL LOGIC)
-                # ═══════════════════════════════════════════════════════════
                 else:
                     print(f"Single subject analysis")
                     
@@ -597,7 +593,7 @@ def analyze_metric(metric_file, df_markers, comparison_groups, metric,
                     break
             
             if subject_id:
-                print(f"  Applying motion artifact cleaning for subject: {subject_id}")
+                print(f"Applying motion artifact cleaning for subject: {subject_id}")
                 upload_folder = os.path.dirname(os.path.dirname(os.path.dirname(metric_file)))
                 
                 df_metric = cleaner.clean_motion_artifacts(
@@ -607,7 +603,7 @@ def analyze_metric(metric_file, df_markers, comparison_groups, metric,
                     upload_folder=upload_folder
                 )
         else:
-            print(f"  WARNING: Could not determine subject ID from path, skipping motion artifact cleaning")
+            print(f"WARNING: Could not determine subject ID from path, skipping motion artifact cleaning")
     
     df_metric = cleaner.clean(
         df_metric, 
@@ -729,9 +725,7 @@ def analyze_metric_multi_subject(manifest, selected_subjects, comparison_groups,
     
     group_data_raw = {}
     
-    # ═══════════════════════════════════════════════════════════════
     # STEP 1: Load data for each subject × event combination
-    # ═══════════════════════════════════════════════════════════════
     metric_col_name = None 
     for subject in selected_subjects:
         print(f"\nProcessing subject: {subject}")
@@ -815,9 +809,7 @@ def analyze_metric_multi_subject(manifest, selected_subjects, comparison_groups,
     
     print(f"\nSuccessfully loaded {len(group_data_raw)} subject-event combinations")
     
-    # ═══════════════════════════════════════════════════════════
     # STEP 2: Apply analysis method to all combinations
-    # ═══════════════════════════════════════════════════════════
     print(f"\nApplying analysis method: {get_method_label(analysis_method)}")
     print(f"Using metric column: '{metric_col_name}'")
 
@@ -836,9 +828,7 @@ def analyze_metric_multi_subject(manifest, selected_subjects, comparison_groups,
         print(f"Warning: No successfully processed data")
         return None, []
     
-    # ═══════════════════════════════════════════════════════════════
     # STEP 3: Calculate statistics for all combinations
-    # ═══════════════════════════════════════════════════════════════
     print(f"\nCalculating statistics...")
     metric_results = {}
     
@@ -847,9 +837,7 @@ def analyze_metric_multi_subject(manifest, selected_subjects, comparison_groups,
         metric_results[composite_label] = stats
         print(f"{composite_label}: mean={stats['mean']:.2f}, std={stats['std']:.2f}, n={stats['count']}")
     
-    # ═══════════════════════════════════════════════════════════════
     # STEP 4: Generate visualizations
-    # ═══════════════════════════════════════════════════════════════
     print(f"\nCreating visualizations (Plot type: {plot_type})...")
     plots = []
     
@@ -884,7 +872,7 @@ def analyze_metric_multi_subject(manifest, selected_subjects, comparison_groups,
 def analyze_hrv_from_ppg(manifest, df_markers, comparison_groups, output_folder):
     """
     Analyze HRV from PPG signals.
-    [PRESERVED - No changes to this function]
+    NOTE: leave dead parameters for future work.
     """
     print("Loading PPG data files...")
     
@@ -1163,7 +1151,7 @@ def process_external_file_column(file_path, config, data_col_config, df_markers,
     Returns:
         Tuple of (results_dict, plots_list)
     """
-    print(f"      Loading column: {data_col_config['column']}")
+    print(f"Loading column: {data_col_config['column']}")
     
     df = pd.read_csv(file_path)
  
@@ -1172,18 +1160,18 @@ def process_external_file_column(file_path, config, data_col_config, df_markers,
     display_name = data_col_config.get('displayName') or data_col
     
     if timestamp_col not in df.columns or data_col not in df.columns:
-        print(f"        ERROR: Required columns not found")
+        print(f"ERROR: Required columns not found")
         return None, []
     
     timestamp_format = config.get('timestampFormat', 'seconds')
     
     if timestamp_format == 'sequential':
-        print(f"        Using sequential/trial-based indexing")
+        print(f"Using sequential/trial-based indexing")
         
         # Try to use trial column if it exists, otherwise use row index
         if 'trial' in df.columns:
             df['UnixTimestamp'] = pd.to_numeric(df['trial'], errors='coerce').fillna(range(len(df)))
-            print(f"        Using 'trial' column as sequence")
+            print(f"Using 'trial' column as sequence")
         else:
             df['UnixTimestamp'] = range(len(df))
             print(f"        Using row index as sequence")
@@ -1206,7 +1194,7 @@ def process_external_file_column(file_path, config, data_col_config, df_markers,
     df_processed = df_processed.dropna(subset=[data_col])
     
     if len(df_processed) == 0:
-        print(f"        ERROR: All values in {data_col} are non-numeric or empty")
+        print(f"ERROR: All values in {data_col} are non-numeric or empty")
         return None, []
     
     if cleaning_enabled:
@@ -1221,7 +1209,7 @@ def process_external_file_column(file_path, config, data_col_config, df_markers,
         )
     
     if len(df_processed) == 0:
-        print(f"        WARNING: All data removed during cleaning")
+        print(f"WARNING: All data removed during cleaning")
         return None, []
     
     if timestamp_format in ['seconds', 'milliseconds']:
@@ -1231,7 +1219,7 @@ def process_external_file_column(file_path, config, data_col_config, df_markers,
     else:
         offset = find_timestamp_offset(df_markers, df_processed)
     
-    print(f"        Timestamp offset: {offset:.2f}s")
+    print(f"Timestamp offset: {offset:.2f}s")
     
     group_data_raw = {}
     
@@ -1244,7 +1232,7 @@ def process_external_file_column(file_path, config, data_col_config, df_markers,
             print(f"        {group_label}: {len(data)} points")
     
     if len(group_data_raw) == 0:
-        print(f"        No data extracted for any event")
+        print(f"No data extracted for any event")
         return None, []
     
     group_data_processed = {}
@@ -1253,7 +1241,7 @@ def process_external_file_column(file_path, config, data_col_config, df_markers,
             processed = apply_analysis_method(data, data_col, analysis_method)
             group_data_processed[group_label] = processed
         except Exception as e:
-            print(f"        Error processing {group_label}: {e}")
+            print(f"Error processing {group_label}: {e}")
             continue
     
     results = {}
@@ -1314,46 +1302,46 @@ def analyze_respiratory_data(manifest, respiratory_configs, comparison_groups, o
     Returns:
         Tuple of (results_dict, plots_list)
     """
-    print(f"  Processing respiratory data from {len(respiratory_configs)} subject(s)")
+    print(f"Processing respiratory data from {len(respiratory_configs)} subject(s)")
     
     all_results = {}
     all_plots = []
     
     for subject, config in respiratory_configs.items():
         if not config.get('selected', True):
-            print(f"  Skipping {subject} (not selected)")
+            print(f"Skipping {subject} (not selected)")
             continue
         
         if batch_mode and selected_subjects and subject not in selected_subjects:
-            print(f"  Skipping {subject} (not in selected subjects)")
+            print(f"Skipping {subject} (not in selected subjects)")
             continue
         
-        print(f"\n  Subject: {subject}")
+        print(f"\nSubject: {subject}")
         
         df_markers = load_event_markers_for_subject(manifest, subject, batch_mode)
         if df_markers is None:
-            print(f"    No event markers found - skipping")
+            print(f"No event markers found - skipping")
             continue
         
         resp_file = find_respiratory_file_for_subject(manifest, subject)
         if not resp_file:
-            print(f"    No respiratory file found - skipping")
+            print(f"No respiratory file found - skipping")
             continue
         
-        print(f"    Loading: {os.path.basename(resp_file)}")
+        print(f"Loading: {os.path.basename(resp_file)}")
         
         df_resp = pd.read_csv(resp_file)
         
         has_new_format = 'timestamp_unix' in df_resp.columns
         
         if has_new_format:
-            print(f"    Detected new header format")
+            print(f"Detected new header format")
             if 'timestamp_unix' in df_resp.columns:
                 df_resp['LocalTimestamp'] = df_resp['timestamp_unix']
             elif 'timestamp' in df_resp.columns:
                 df_resp['LocalTimestamp'] = pd.to_datetime(df_resp['timestamp']).apply(lambda x: x.timestamp())
         else:
-            print(f"    Detected old header format")
+            print(f"Detected old header format")
             if 'timestamp' in df_resp.columns:
                 if pd.api.types.is_numeric_dtype(df_resp['timestamp']):
                     df_resp['LocalTimestamp'] = df_resp['timestamp']
@@ -1363,7 +1351,7 @@ def analyze_respiratory_data(manifest, respiratory_configs, comparison_groups, o
         offset = find_timestamp_offset(df_markers, df_resp)
         
         if config.get('analyzeRR', True) and 'RR' in df_resp.columns:
-            print(f"\n    Analyzing RR (Respiratory Rate)")
+            print(f"\nAnalyzing RR (Respiratory Rate)")
             try:
                 results, plots = analyze_respiratory_metric(
                     df_resp,
@@ -1387,15 +1375,15 @@ def analyze_respiratory_data(manifest, respiratory_configs, comparison_groups, o
                 if plots:
                     all_plots.extend(plots)
                 else:
-                    print(f"      No plots generated for RR (likely due to sparse data)")
+                    print(f"No plots generated for RR (likely due to sparse data)")
                     
             except Exception as e:
-                print(f"      Error analyzing RR: {e}")
+                print(f"Error analyzing RR: {e}")
                 import traceback
                 traceback.print_exc()
         
         if config.get('analyzeForce', True) and 'force' in df_resp.columns:
-            print(f"\n    Analyzing Force (Respiratory Effort)")
+            print(f"\nAnalyzing Force (Respiratory Effort)")
             try:
                 results, plots = analyze_respiratory_metric(
                     df_resp,
@@ -1419,9 +1407,9 @@ def analyze_respiratory_data(manifest, respiratory_configs, comparison_groups, o
                     all_plots.extend(plots)
                     
             except Exception as e:
-                print(f"      Error analyzing Force: {e}")
+                print(f"Error analyzing Force: {e}")
     
-    print(f"\n  Respiratory data analysis complete: {len(all_results)} metrics processed")
+    print(f"\nRespiratory data analysis complete: {len(all_results)} metrics processed")
     return all_results, all_plots
 
 
@@ -1465,11 +1453,11 @@ def analyze_respiratory_metric(df_resp, metric_col, df_markers, offset, comparis
     total_count = len(df_processed)
     sparsity_ratio = non_null_count / total_count if total_count > 0 else 0
 
-    print(f"        Data sparsity: {non_null_count}/{total_count} ({sparsity_ratio*100:.1f}% non-null)")
+    print(f"Data sparsity: {non_null_count}/{total_count} ({sparsity_ratio*100:.1f}% non-null)")
 
     if sparsity_ratio < 0.1:
-        print(f"        WARNING: Very sparse data for {metric_col} (<10% non-null values)")
-        print(f"        This may affect analysis quality")
+        print(f"WARNING: Very sparse data for {metric_col} (<10% non-null values)")
+        print(f"This may affect analysis quality")
 
     if cleaning_enabled:
         from DataCleaner import BiometricDataCleaner
@@ -1478,10 +1466,10 @@ def analyze_respiratory_metric(df_resp, metric_col, df_markers, offset, comparis
         total_count = len(df_processed)
         sparsity_ratio = non_null_count / total_count if total_count > 0 else 0
         
-        print(f"        Data density: {non_null_count}/{total_count} ({sparsity_ratio*100:.1f}% non-null)")
+        print(f"Data density: {non_null_count}/{total_count} ({sparsity_ratio*100:.1f}% non-null)")
         
         if sparsity_ratio < 0.5:  # If more than 50% sparse
-            print(f"        Detected sparse metric - cleaning only non-null values without removing rows")
+            print(f"Detected sparse metric - cleaning only non-null values without removing rows")
             
             # For sparse metrics, only clean the non-null values
             # Create a mask for non-null values
@@ -1503,11 +1491,11 @@ def analyze_respiratory_metric(df_resp, metric_col, df_markers, offset, comparis
                 
                 df_processed.loc[valid_mask, metric_col] = df_cleaned[metric_col].values
                 
-                print(f"        Cleaned {len(df_cleaned)}/{non_null_count} non-null values")
+                print(f"Cleaned {len(df_cleaned)}/{non_null_count} non-null values")
             else:
-                print(f"        No non-null values to clean")
+                print(f"No non-null values to clean")
         else:
-            print(f"        Continuous metric - applying standard cleaning")
+            print(f"Continuous metric - applying standard cleaning")
             metric_type = 'RR' if metric_col == 'RR' else 'default'
             cleaner = BiometricDataCleaner(metric_type=metric_type)
             df_processed = cleaner.clean(
@@ -1519,7 +1507,7 @@ def analyze_respiratory_metric(df_resp, metric_col, df_markers, offset, comparis
     
     valid_data_count = df_processed[metric_col].notna().sum()
     if valid_data_count == 0:
-        print(f"        WARNING: No valid data available after cleaning")
+        print(f"WARNING: No valid data available after cleaning")
         return None, []
     
     group_data_raw = {}
@@ -1530,10 +1518,10 @@ def analyze_respiratory_metric(df_resp, metric_col, df_markers, offset, comparis
         
         if len(data) > 0:
             group_data_raw[group_label] = data
-            print(f"        {group_label}: {len(data)} points")
+            print(f"{group_label}: {len(data)} points")
     
     if len(group_data_raw) == 0:
-        print(f"        No data extracted for any event")
+        print(f"No data extracted for any event")
         return None, []
     
     group_data_processed = {}
@@ -1542,7 +1530,7 @@ def analyze_respiratory_metric(df_resp, metric_col, df_markers, offset, comparis
             processed = apply_analysis_method(data, metric_col, analysis_method)
             group_data_processed[group_label] = processed
         except Exception as e:
-            print(f"        Error processing {group_label}: {e}")
+            print(f"Error processing {group_label}: {e}")
             continue
     
     results = {}
@@ -1606,33 +1594,33 @@ def analyze_cardiac_data(manifest, cardiac_configs, comparison_groups, output_fo
     Returns:
         Tuple of (results_dict, plots_list)
     """
-    print(f"  Processing cardiac data from {len(cardiac_configs)} subject(s)")
+    print(f"Processing cardiac data from {len(cardiac_configs)} subject(s)")
     
     all_results = {}
     all_plots = []
     
     for subject, config in cardiac_configs.items():
         if not config.get('selected', True):
-            print(f"  Skipping {subject} (not selected)")
+            print(f"Skipping {subject} (not selected)")
             continue
         
         if batch_mode and selected_subjects and subject not in selected_subjects:
-            print(f"  Skipping {subject} (not in selected subjects)")
+            print(f"Skipping {subject} (not in selected subjects)")
             continue
         
-        print(f"\n  Subject: {subject}")
+        print(f"\nSubject: {subject}")
         
         df_markers = load_event_markers_for_subject(manifest, subject, batch_mode)
         if df_markers is None:
-            print(f"    No event markers found - skipping")
+            print(f"No event markers found - skipping")
             continue
         
         cardiac_file = find_cardiac_file_for_subject(manifest, subject)
         if not cardiac_file:
-            print(f"    No cardiac file found - skipping")
+            print(f"No cardiac file found - skipping")
             continue
         
-        print(f"    Loading: {os.path.basename(cardiac_file)}")
+        print(f"Loading: {os.path.basename(cardiac_file)}")
         
         df_cardiac = pd.read_csv(cardiac_file)
         
@@ -1647,7 +1635,7 @@ def analyze_cardiac_data(manifest, cardiac_configs, comparison_groups, output_fo
         offset = find_timestamp_offset(df_markers, df_cardiac)
         
         if config.get('analyzeHR', True) and 'HR' in df_cardiac.columns:
-            print(f"\n    Analyzing HR (Heart Rate)")
+            print(f"\nAnalyzing HR (Heart Rate)")
             try:
                 results, plots = analyze_cardiac_metric(
                     df_cardiac,
@@ -1675,7 +1663,7 @@ def analyze_cardiac_data(manifest, cardiac_configs, comparison_groups, output_fo
                 print(f"      Error analyzing HR: {e}")
         
         if config.get('analyzeHRV', True) and 'HRV' in df_cardiac.columns:
-            print(f"\n    Analyzing HRV (Heart Rate Variability)")
+            print(f"\nAnalyzing HRV (Heart Rate Variability)")
             try:
                 results, plots = analyze_cardiac_metric(
                     df_cardiac,
@@ -1698,9 +1686,9 @@ def analyze_cardiac_data(manifest, cardiac_configs, comparison_groups, output_fo
                     all_plots.extend(plots)
                     
             except Exception as e:
-                print(f"      Error analyzing HRV: {e}")
+                print(f"Error analyzing HRV: {e}")
     
-    print(f"\n  Cardiac data analysis complete: {len(all_results)} metrics processed")
+    print(f"\nCardiac data analysis complete: {len(all_results)} metrics processed")
     return all_results, all_plots
 
 
@@ -1755,7 +1743,7 @@ def analyze_cardiac_metric(df_cardiac, metric_col, df_markers, offset, compariso
         )
     
     if len(df_processed) == 0:
-        print(f"        WARNING: All data removed during cleaning")
+        print(f"WARNING: All data removed during cleaning")
         return None, []
     
     group_data_raw = {}
@@ -1766,10 +1754,10 @@ def analyze_cardiac_metric(df_cardiac, metric_col, df_markers, offset, compariso
         
         if len(data) > 0:
             group_data_raw[group_label] = data
-            print(f"        {group_label}: {len(data)} points")
+            print(f"{group_label}: {len(data)} points")
     
     if len(group_data_raw) == 0:
-        print(f"        No data extracted for any event")
+        print(f"No data extracted for any event")
         return None, []
     
     group_data_processed = {}
@@ -1778,7 +1766,7 @@ def analyze_cardiac_metric(df_cardiac, metric_col, df_markers, offset, compariso
             processed = apply_analysis_method(data, metric_col, analysis_method)
             group_data_processed[group_label] = processed
         except Exception as e:
-            print(f"        Error processing {group_label}: {e}")
+            print(f"Error processing {group_label}: {e}")
             continue
     
     results = {}
